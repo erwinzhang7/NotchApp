@@ -1,0 +1,43 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# XcodeGen output — regenerate via `xcodegen`
+*.xcodeproj
+*.xcworkspace
+
+# Swift Package Manager
+.swiftpm/
+.build/
+Packages/
+Package.pins
+Package.resolved
+
+# CocoaPods / Carthage (not used, kept for safety)
+Pods/
+Carthage/Build/
+
+# Editor / OS
+*.swp
+*.swo
+.idea/
+.vscode/

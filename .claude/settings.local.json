@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodegen --version)",
+      "Bash(xcodegen *)",
+      "Bash(xcodebuild -project /Users/erwin/Developer/NotchApp/NotchApp.xcodeproj -scheme NotchApp -configuration Debug -destination 'platform=macOS' build)",
+      "Bash(xcodebuild -project /Users/erwin/Developer/NotchApp/NotchApp.xcodeproj -scheme NotchApp -configuration Debug -sdk macosx -arch arm64 ONLY_ACTIVE_ARCH=YES build)",
+      "Bash(grep -Ev '^\\(2026|\\\\s+Reason:|\\\\s+Referenced from:|UserInfo=|NSCocoaErrorDomain|NSLocalizedFailureReason|NSLocalizedRecoverySuggestion|NSLocalizedDescription|NSFilePath|NSBundlePath|NSDebugDescription|NSUnderlyingError|DVTPlugInDYLDErrorMessageErrorKey|DVTPlugInExecutablePathErrorKey|DVTPlugInIdentifierErrorKey|dyldError|A required plugin|plug-in failed|\\\\s+tried:|\\\\s+'\\\\''| Reason:|^$\\)')",
+      "Read(//Library/Developer/PrivateFrameworks/**)",
+      "Read(//Library/Developer/**)",
+      "Bash(xcode-select -p)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git -c user.email=erwinzhang7@gmail.com -c user.name='Erwin Zhang' commit -q -m \"Initial scaffold: notch panel shell + module stubs\")"
+    ]
+  }
+}

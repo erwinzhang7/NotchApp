@@ -1,0 +1,41 @@
+name: NotchApp
+options:
+  bundleIdPrefix: com.erwinzhang
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_HARDENED_RUNTIME: YES
+
+targets:
+  NotchApp:
+    type: application
+    platform: macOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Sources
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.erwinzhang.NotchApp
+        PRODUCT_NAME: NotchApp
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Erwin Zhang. MIT License."
+        INFOPLIST_KEY_NSPrincipalClass: NSApplication
+        GENERATE_INFOPLIST_FILE: YES
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_PREVIEWS: YES
+        SWIFT_EMIT_LOC_STRINGS: YES
+    entitlements:
+      path: Resources/NotchApp.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
