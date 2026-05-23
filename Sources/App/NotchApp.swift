@@ -5,6 +5,11 @@ struct NotchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Settings { EmptyView() }
+        Settings {
+            ClipboardSettingsView(
+                settings: ClipboardManager.shared.settings,
+                store: ClipboardManager.shared.store
+            )
+        }
     }
 }

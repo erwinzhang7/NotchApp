@@ -50,8 +50,36 @@ below the menu bar. The panel is re-positioned on
 
 ### Feature modules
 
-Each feature module is a single stub file with a one-line doc comment and
-a `// TODO`. They will be filled in one at a time in follow-up sessions.
+- **ClipboardManager** — implemented. Polls `NSPasteboard.general` at 0.5 s
+  intervals via `changeCount`. Captures text, images (downscaled thumbnail
+  + full image in RAM, capped at 20 MB), and file copies (stored as
+  bookmark references, never as byte copies). Exposes a SwiftUI history
+  list (paste-on-select + search) and a Settings pane (auto-clear
+  interval, per-type capture toggles, clear-now). See the privacy section
+  below.
+- **FileShelf**, **MediaControls** — still stubs, filled in next.
+
+### Privacy: clipboard history is in-memory only
+
+The single load-bearing privacy rule of this app:
+
+> **Clipboard history is never written to disk.** No SQLite, no files, no
+> `UserDefaults` entry holds clipboard content. History lives in RAM and
+> dies on app quit.
+
+What this means concretely:
+
+- The only thing `ClipboardManager` persists is *preferences* — the
+  auto-clear interval and the per-type capture toggles. Those go in
+  `UserDefaults`. Clipboard *content* does not.
+- File copies are stored as URL bookmarks, not byte copies. The app
+  remembers *where* the file was so it can re-copy the reference later;
+  it never duplicates file contents.
+- Pasteboard items flagged `org.nspasteboard.ConcealedType` (the
+  convention password managers use) and `org.nspasteboard.TransientType`
+  are skipped at capture time — they never enter history.
+- Single images larger than ~20 MB are skipped entirely rather than
+  truncated, to bound RAM growth.
 
 ## Attribution
 

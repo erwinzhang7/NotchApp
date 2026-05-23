@@ -1,50 +1,74 @@
 import AppKit
 
-/// Measures the physical notch on the active screen and computes the panel frame.
+/// Measures the physical notch on the active screen and computes the panel + visible sizes.
 enum NotchGeometry {
-    /// Default panel size when the active display has no notch.
-    static let fallbackSize = CGSize(width: 220, height: 32)
+    /// Visible collapsed size when the active display has no notch.
+    static let fallbackCollapsedSize = CGSize(width: 200, height: 32)
+
+    /// Visible size of the expanded surface. Sized for the clipboard history list:
+    /// search field + ~6 visible rows + padding.
+    static let defaultExpandedSize = CGSize(width: 480, height: 400)
+
+    /// Extra hit-region around the visible surface so hover is forgiving.
+    /// Must stay in sync with NotchShellView.hoverSlop.
+    static let hoverSlop: CGFloat = 8
+
+    /// Extra room around the visible surface so spring overshoot isn't clipped.
+    static let breathingRoom = CGSize(width: 16, height: 16)
 
     struct Placement {
-        /// Frame in screen coordinates (origin = bottom-left of the display).
-        let frame: CGRect
-        /// The screen the panel should attach to.
+        /// Frame for the NSPanel itself, in screen coordinates.
+        let panelFrame: CGRect
+        /// Visible size when collapsed (matches the notch on notched displays).
+        let collapsedSize: CGSize
+        /// Visible size when expanded.
+        let expandedSize: CGSize
+        /// Screen the panel attaches to.
         let screen: NSScreen
         /// True if the screen has a hardware notch.
         let hasNotch: Bool
     }
 
-    /// Picks the best screen and returns where the panel should sit.
-    static func placement(for size: CGSize? = nil) -> Placement? {
+    static func placement(expandedSize: CGSize = defaultExpandedSize) -> Placement? {
         guard let screen = preferredScreen() else { return nil }
 
         let notchHeight = screen.safeAreaInsets.top
-        let notchWidth = measuredNotchWidth(on: screen)
+        let measuredWidth = measuredNotchWidth(on: screen)
+        let hasNotch = notchHeight > 0 && (measuredWidth ?? 0) > 0
 
-        if notchHeight > 0, let notchWidth, notchWidth > 0 {
-            let panelSize = size ?? CGSize(width: notchWidth, height: notchHeight)
-            let frame = CGRect(
-                x: screen.frame.midX - panelSize.width / 2,
-                y: screen.frame.maxY - panelSize.height,
-                width: panelSize.width,
-                height: panelSize.height
-            )
-            return Placement(frame: frame, screen: screen, hasNotch: true)
+        let collapsedSize: CGSize
+        let panelTopY: CGFloat
+        if hasNotch, let width = measuredWidth {
+            collapsedSize = CGSize(width: width, height: notchHeight)
+            // Panel top sits right at the screen top, so the collapsed pill aligns with the notch.
+            panelTopY = screen.frame.maxY
+        } else {
+            collapsedSize = fallbackCollapsedSize
+            // No notch: drop below the menu bar.
+            panelTopY = screen.frame.maxY - NSStatusBar.system.thickness
         }
 
-        // No notch: pin to top-center of the screen, just below the menu bar.
-        let panelSize = size ?? fallbackSize
-        let menuBarHeight = NSStatusBar.system.thickness
-        let frame = CGRect(
-            x: screen.frame.midX - panelSize.width / 2,
-            y: screen.frame.maxY - menuBarHeight - panelSize.height,
-            width: panelSize.width,
-            height: panelSize.height
+        let panelWidth = max(collapsedSize.width, expandedSize.width)
+            + hoverSlop * 2
+            + breathingRoom.width * 2
+        let panelHeight = expandedSize.height + hoverSlop + breathingRoom.height
+
+        let panelFrame = CGRect(
+            x: screen.frame.midX - panelWidth / 2,
+            y: panelTopY - panelHeight,
+            width: panelWidth,
+            height: panelHeight
         )
-        return Placement(frame: frame, screen: screen, hasNotch: false)
+
+        return Placement(
+            panelFrame: panelFrame,
+            collapsedSize: collapsedSize,
+            expandedSize: expandedSize,
+            screen: screen,
+            hasNotch: hasNotch
+        )
     }
 
-    /// Prefers the built-in notched display, otherwise the screen with the mouse, otherwise main.
     private static func preferredScreen() -> NSScreen? {
         if let notched = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
             return notched
@@ -56,8 +80,6 @@ enum NotchGeometry {
         return NSScreen.main
     }
 
-    /// Notch width = full screen width − left aux strip − right aux strip.
-    /// Returns nil if the auxiliary areas are not reported by the system.
     private static func measuredNotchWidth(on screen: NSScreen) -> CGFloat? {
         guard
             let left = screen.auxiliaryTopLeftArea,
