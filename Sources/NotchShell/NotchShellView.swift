@@ -14,7 +14,7 @@ struct NotchShellView: View {
     @State private var selectedTab: NotchTab = .clip
 
     /// Must stay in sync with NotchGeometry.hoverSlop.
-    private let hoverSlop: CGFloat = 8
+    private let hoverSlop: CGFloat = 5
 
     var body: some View {
         let isExpanded = state.isExpanded

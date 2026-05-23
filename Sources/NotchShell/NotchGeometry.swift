@@ -11,7 +11,7 @@ enum NotchGeometry {
 
     /// Extra hit-region around the visible surface so hover is forgiving.
     /// Must stay in sync with NotchShellView.hoverSlop.
-    static let hoverSlop: CGFloat = 8
+    static let hoverSlop: CGFloat = 5
 
     /// Extra room around the visible surface so spring overshoot isn't clipped.
     static let breathingRoom = CGSize(width: 16, height: 16)

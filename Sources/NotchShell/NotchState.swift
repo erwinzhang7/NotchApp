@@ -15,22 +15,26 @@ final class NotchState: ObservableObject {
     /// post-paste hold, or an active drag-and-drop targeting the panel.
     var isExpanded: Bool { isHovered || isPinned || isHeldOpen || isDragTargeted }
 
-    // Grace period so the panel doesn't flicker when the cursor briefly clips the hit region.
-    private let collapseDelay: Duration = .milliseconds(300)
-    private var collapseTask: Task<Void, Never>?
+    // Open-intent delay: cursor must dwell on the notch this long before the panel
+    // expands. Stops quick swipes past the notch from flashing the panel open.
+    private let openDelay: Duration = .milliseconds(200)
+    // Close grace: cursor can briefly leave the hit region without triggering collapse.
+    private let collapseDelay: Duration = .milliseconds(150)
+    private var hoverDebounce: Task<Void, Never>?
     private var holdOpenTask: Task<Void, Never>?
 
     func setHovered(_ hovering: Bool) {
-        collapseTask?.cancel()
-        if hovering {
-            isHovered = true
-            return
-        }
-        let delay = collapseDelay
-        collapseTask = Task { @MainActor [weak self] in
+        // Always cancel the in-flight debounce — whatever transition was pending is
+        // superseded by the new target. If the new target matches current state, we
+        // also cancel any scheduled change in the OTHER direction (e.g. cursor returns
+        // during the close grace) and stay put.
+        hoverDebounce?.cancel()
+        if hovering == isHovered { return }
+        let delay = hovering ? openDelay : collapseDelay
+        hoverDebounce = Task { @MainActor [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled else { return }
-            self?.isHovered = false
+            self?.isHovered = hovering
         }
     }
 
