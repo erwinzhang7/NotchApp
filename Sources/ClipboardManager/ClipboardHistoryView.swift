@@ -24,6 +24,9 @@ struct ClipboardHistoryView: View {
             content
         }
         .frame(minWidth: 240, minHeight: 200)
+        // Pure black so the clipboard surface matches the notch / tab
+        // strip without the .bar / system-list grey breaking the tone.
+        .background(Color.black)
     }
 
     private var searchField: some View {
@@ -44,7 +47,8 @@ struct ClipboardHistoryView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.bar)
+        // Was .bar (system grey toolbar material). Pure black to match.
+        .background(Color.black)
     }
 
     @ViewBuilder
@@ -59,6 +63,7 @@ struct ClipboardHistoryView: View {
                     : "Try a different search.")
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black)
         } else {
             List {
                 ForEach(visible) { item in
@@ -69,9 +74,17 @@ struct ClipboardHistoryView: View {
                             Button("Copy") { copy(item) }
                             Button("Remove", role: .destructive) { store.remove(item) }
                         }
+                        // Per-row clear background so the only fill is
+                        // the row's own justCopied green flash; List's
+                        // default row tint can't peek through.
+                        .listRowBackground(Color.clear)
                 }
             }
             .listStyle(.inset)
+            // Hide List's own scroll-content background (the grey that
+            // was previously bleeding through under the rows).
+            .scrollContentBackground(.hidden)
+            .background(Color.black)
         }
     }
 

@@ -3,7 +3,7 @@ import SwiftUI
 /// Tabs presented on either side of the physical notch when the panel is expanded.
 /// - `clip`: clipboard history (implemented, default).
 /// - `ambient`: reserved for future modules — media controls, file shelf, etc.
-enum NotchTab: Hashable {
+enum NotchTab: String, Hashable {
     case ambient
     case clip
 

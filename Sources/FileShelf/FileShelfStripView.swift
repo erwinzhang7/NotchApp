@@ -24,9 +24,13 @@ struct FileShelfStripView: View {
         }
         .animation(.easeInOut(duration: 0.18), value: conversion.lastError)
         .padding(10)
+        // At rest: transparent (black panel shows through). On drag-over:
+        // brief white-tinted highlight so the drop target is obviously
+        // active. The accent-coloured dashed border below carries most
+        // of the targeted feedback either way.
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.white.opacity(isTargeted ? 0.10 : 0.04))
+                .fill(isTargeted ? Color.white.opacity(0.10) : Color.clear)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)

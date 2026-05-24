@@ -10,7 +10,7 @@ struct NotchShellView: View {
     @ObservedObject var state: NotchState
     @ObservedObject var layout: NotchLayoutModel
 
-    @State private var selectedTab: NotchTab = .clip
+    @AppStorage("notch.selectedTab") private var selectedTab: NotchTab = .ambient
 
     /// Must stay in sync with NotchGeometry.hoverSlop.
     private let hoverSlop: CGFloat = 5
@@ -18,25 +18,13 @@ struct NotchShellView: View {
     var body: some View {
         let isExpanded = state.isExpanded
         let size = isExpanded ? layout.expandedSize : layout.collapsedSize
-        let pillRadius = min(layout.collapsedSize.height / 2, 16)
-        // Top corners go to zero when expanded so the panel sits flush against the notch /
-        // top edge of the screen. Bottom corners stay generously rounded.
-        let topRadius: CGFloat = isExpanded ? 0 : pillRadius
-        let bottomRadius: CGFloat = isExpanded ? 24 : pillRadius
+        let bottomCornerRadius: CGFloat = 10
         let hitWidth = size.width + hoverSlop * 2
         let hitHeight = size.height + hoverSlop
         let notchReserveHeight = layout.collapsedSize.height
         let notchReserveWidth = layout.collapsedSize.width
 
-        let panelShape = UnevenRoundedRectangle(
-            cornerRadii: RectangleCornerRadii(
-                topLeading: topRadius,
-                bottomLeading: bottomRadius,
-                bottomTrailing: bottomRadius,
-                topTrailing: topRadius
-            ),
-            style: .continuous
-        )
+        let panelShape = NotchPanelShape(bottomConvexRadius: bottomCornerRadius)
 
         ZStack(alignment: .top) {
             // Invisible hover/tap target sized slightly larger than the visible surface.
@@ -72,7 +60,7 @@ struct NotchShellView: View {
             // on notched displays.
             .overlay(
                 panelShape
-                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
                     .mask(
                         VStack(spacing: 0) {
                             Color.clear.frame(height: 1.5)
