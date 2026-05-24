@@ -8,8 +8,7 @@ import UniformTypeIdentifiers
 /// drop handler.
 struct NotchShellView: View {
     @ObservedObject var state: NotchState
-    let collapsedSize: CGSize
-    let expandedSize: CGSize
+    @ObservedObject var layout: NotchLayoutModel
 
     @State private var selectedTab: NotchTab = .clip
 
@@ -18,16 +17,16 @@ struct NotchShellView: View {
 
     var body: some View {
         let isExpanded = state.isExpanded
-        let size = isExpanded ? expandedSize : collapsedSize
-        let pillRadius = min(collapsedSize.height / 2, 16)
+        let size = isExpanded ? layout.expandedSize : layout.collapsedSize
+        let pillRadius = min(layout.collapsedSize.height / 2, 16)
         // Top corners go to zero when expanded so the panel sits flush against the notch /
         // top edge of the screen. Bottom corners stay generously rounded.
         let topRadius: CGFloat = isExpanded ? 0 : pillRadius
         let bottomRadius: CGFloat = isExpanded ? 24 : pillRadius
         let hitWidth = size.width + hoverSlop * 2
         let hitHeight = size.height + hoverSlop
-        let notchReserveHeight = collapsedSize.height
-        let notchReserveWidth = collapsedSize.width
+        let notchReserveHeight = layout.collapsedSize.height
+        let notchReserveWidth = layout.collapsedSize.width
 
         let panelShape = UnevenRoundedRectangle(
             cornerRadii: RectangleCornerRadii(
@@ -44,9 +43,18 @@ struct NotchShellView: View {
             Color.clear
                 .frame(width: hitWidth, height: hitHeight)
 
-            // Visible surface + expanded content.
+            // Visible surface + expanded content. Fill and border are
+            // opacity-gated on isExpanded — collapsed renders nothing
+            // visible at all (no pill, no background, no border) so the
+            // notch area looks empty when at rest. The hit zone above,
+            // the global hover monitor, .onTapGesture and the panel-wide
+            // .onDrop are all unaffected — hover-to-expand, click-to-pin,
+            // and drag-to-reveal still trigger from the invisible region.
+            // Opacity rather than `if isExpanded` so the spring animation
+            // fades the surface in/out smoothly with the size change.
             ZStack {
                 panelShape.fill(Color.black)
+                    .opacity(isExpanded ? 1 : 0)
 
                 if isExpanded {
                     expandedContent(
@@ -71,6 +79,7 @@ struct NotchShellView: View {
                             Rectangle()
                         }
                     )
+                    .opacity(isExpanded ? 1 : 0)
             )
         }
         .contentShape(Rectangle())
@@ -144,7 +153,7 @@ struct NotchShellView: View {
         Group {
             switch selectedTab {
             case .ambient:
-                NotchAmbientPlaceholderView()
+                AmbientDashboardView()
             case .clip:
                 ClipTabContent(
                     clipboardStore: ClipboardManager.shared.store,

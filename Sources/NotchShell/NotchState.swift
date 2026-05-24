@@ -17,7 +17,7 @@ final class NotchState: ObservableObject {
 
     // Open-intent delay: cursor must dwell on the notch this long before the panel
     // expands. Stops quick swipes past the notch from flashing the panel open.
-    private let openDelay: Duration = .milliseconds(200)
+    private let openDelay: Duration = .milliseconds(100)
     // Close grace: cursor can briefly leave the hit region without triggering collapse.
     private let collapseDelay: Duration = .milliseconds(150)
     private var hoverDebounce: Task<Void, Never>?

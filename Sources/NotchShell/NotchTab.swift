@@ -15,9 +15,12 @@ enum NotchTab: Hashable {
     }
 }
 
-/// Small pill label rendered inside one of the side strips beside the notch.
+/// Pill label rendered inside one of the side strips beside the notch.
 /// Purely visual — the surrounding tap targets live in NotchShellView so this view
 /// itself does not capture clicks (it sits under `.allowsHitTesting(false)`).
+/// Padding sized so the selected pill fills most of the tab strip's
+/// height/width and reads as a substantial element rather than a small
+/// floating chip; the hit regions in `tabStrip` are completely unchanged.
 struct TabLabelView: View {
     let tab: NotchTab
     let selected: Bool
@@ -26,8 +29,8 @@ struct TabLabelView: View {
         Text(tab.title)
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(selected ? Color.white : Color.white.opacity(0.45))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 9)
             .background(
                 Capsule()
                     .fill(selected ? Color.white.opacity(0.16) : Color.clear)
@@ -36,22 +39,3 @@ struct TabLabelView: View {
     }
 }
 
-/// Stand-in for the left (Ambient) tab until media controls / file shelf land.
-struct NotchAmbientPlaceholderView: View {
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 28))
-                .foregroundStyle(.tertiary)
-            Text("Reserved for future modules")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Text("Media controls, file shelf, and other ambient surfaces will live here.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}

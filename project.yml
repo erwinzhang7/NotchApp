@@ -24,11 +24,36 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+      - path: Vendor/MediaRemoteAdapter/mediaremote-adapter.pl
+        buildPhase: resources
+        type: file
+      - path: Vendor/MediaRemoteAdapter/MediaRemoteAdapterTestClient
+        buildPhase: resources
+        type: file
+      - path: Vendor/MediaRemoteAdapter/MediaRemoteAdapter-LICENSE.txt
+        buildPhase: resources
+        type: file
+    dependencies:
+      # Bundled but NOT linked. The framework is loaded at runtime by the
+      # Perl adapter script (mediaremote-adapter.pl), not by our binary.
+      - framework: Vendor/MediaRemoteAdapter/MediaRemoteAdapter.framework
+        embed: true
+        link: false
+        codeSign: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.erwinzhang.NotchApp
         PRODUCT_NAME: NotchApp
         INFOPLIST_KEY_LSUIElement: YES
+        # Required for Apple Events / Automation. Without this, hardened
+        # runtime hard-denies AppleScript control of other apps with no
+        # consent prompt shown — which is why Spotify seek was silently
+        # erroring with -1743.
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: "NotchApp controls media players like Spotify so you can scrub the playback position from the notch."
+        # EventKit (Calendar + Reminders). Required on macOS 14+; without
+        # these the system silently denies the request rather than prompting.
+        INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "NotchApp displays your upcoming calendar events in the Ambient tab."
+        INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: "NotchApp displays your scheduled reminders in the Ambient tab."
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Erwin Zhang. MIT License."
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         GENERATE_INFOPLIST_FILE: YES
@@ -39,3 +64,12 @@ targets:
       path: Resources/NotchApp.entitlements
       properties:
         com.apple.security.app-sandbox: false
+        # Pair to NSAppleEventsUsageDescription above. Required by hardened
+        # runtime to send Apple events to other apps. Non-sandbox variant —
+        # one switch covers all targets; no per-app temporary-exception.
+        com.apple.security.automation.apple-events: true
+        # EventKit access — not strictly required in non-sandboxed apps
+        # (Info.plist keys suffice), but harmless and keeps the bundle
+        # portable to sandboxed builds in the future.
+        com.apple.security.personal-information.calendars: true
+        com.apple.security.personal-information.reminders: true

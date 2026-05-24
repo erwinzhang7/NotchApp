@@ -1,19 +1,30 @@
 import AppKit
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notchController = NotchWindowController()
     private lazy var historyWindow = ClipboardHistoryWindowController(store: ClipboardManager.shared.store)
+    private lazy var settingsWindow = SettingsWindowController()
     private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         notchController.show()
         ClipboardManager.shared.monitor.start()
+        // Force-init these so the adapter subprocess + EventKit observers
+        // are running by the time the user opens the Ambient tab. None of
+        // them auto-request permission — the EventKit modules prompt only
+        // when the user clicks "Grant Access" from the inline UI.
+        _ = MediaControls.shared
+        _ = CalendarManager.shared
+        _ = RemindersManager.shared
+        _ = ConversionManager.shared
         installStatusItem()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         ClipboardManager.shared.monitor.stop()
+        MediaControls.shared.adapter.stop()
         notchController.hide()
     }
 
@@ -49,13 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        NSApp.activate(ignoringOtherApps: true)
-        // macOS 14+ Settings scene; selector is the supported escape hatch from AppKit code.
-        if NSApp.responds(to: Selector(("showSettingsWindow:"))) {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        } else {
-            NSApp.sendAction(Selector(("showPreferencesWindow:")), to: nil, from: nil)
-        }
+        // Skip NSApp.sendAction(Selector("showSettingsWindow:"), …): on
+        // macOS 26 from an LSUIElement agent the SwiftUI Settings scene
+        // isn't reachable via the responder chain (no key window to anchor
+        // it on) and the action silently no-ops. SettingsWindowController
+        // owns the NSWindow directly and brings the app to front itself.
+        settingsWindow.show()
     }
 
     @objc private func showHistory() {

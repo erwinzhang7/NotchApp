@@ -22,12 +22,17 @@ final class FileShelfStore: ObservableObject {
             relativeTo: nil
         ) else { return }
         let icon = NSWorkspace.shared.icon(forFile: url.path)
+        // Prefer the system's content-type query (handles extensionless files,
+        // bundle directories, etc.) and fall back to the filename extension.
+        let utType = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)
+            ?? UTType(filenameExtension: url.pathExtension)
         let item = FileShelfItem(
             url: url,
             bookmark: bookmark,
             displayName: url.lastPathComponent,
             icon: icon,
-            addedAt: Date()
+            addedAt: Date(),
+            utType: utType
         )
         items.append(item)
     }

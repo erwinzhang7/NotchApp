@@ -21,8 +21,18 @@ import SwiftUI
 /// (no large invisible window above the rest of the screen, so the OS routes
 /// clicks straight to the apps below). The frame change is deferred one main
 /// queue cycle so it never fires inside a SwiftUI layout pass.
+///
+/// AMBIENT REFLOW
+/// The expanded panel's HEIGHT depends on whether the ambient dashboard's
+/// bottom row (Calendar / Reminders) is showing. We observe AmbientSettings;
+/// when either toggle flips, the expanded size is recomputed, the
+/// NotchLayoutModel publishes the new size (SwiftUI reflows the content),
+/// and the panel frame animates to match.
+@MainActor
 final class NotchWindowController: NSObject {
     private let state = NotchState()
+    private let ambient = AmbientSettings.shared
+    private let layoutModel: NotchLayoutModel
     private var panel: NotchPanel?
     private var collapsedPanelFrame: CGRect = .zero
     private var expandedPanelFrame: CGRect = .zero
@@ -31,17 +41,35 @@ final class NotchWindowController: NSObject {
     private var mouseMovedMonitor: EventMonitor?
     private var cancellables = Set<AnyCancellable>()
 
-    func show() {
-        guard let placement = NotchGeometry.placement() else { return }
+    /// Compact music-view height inside the dashboard. Must stay in sync
+    /// with AmbientDashboardView.musicHeight.
+    private static let ambientMusicHeight: CGFloat = 160
+    /// Additional height contributed by the bottom row (Calendar / Reminders)
+    /// when at least one of them is enabled. Sized for a few events plus a
+    /// short scrollable reminder list — at-a-glance, not dense.
+    private static let ambientBottomHeight: CGFloat = 200
 
+    override init() {
+        // Bootstrap with sane defaults; show() refreshes from actual screen.
+        self.layoutModel = NotchLayoutModel(
+            collapsedSize: NotchGeometry.fallbackCollapsedSize,
+            expandedSize: NotchGeometry.defaultExpandedSize
+        )
+        super.init()
+    }
+
+    func show() {
+        let initialExpanded = computeExpandedSize()
+        guard let placement = NotchGeometry.placement(expandedSize: initialExpanded) else { return }
+
+        layoutModel.expandedSize = placement.expandedSize
         expandedPanelFrame = placement.panelFrame
         collapsedPanelFrame = pillFrame(for: placement)
 
         let panel = NotchPanel(contentRect: placement.panelFrame)
         let hosting = NSHostingView(rootView: NotchShellView(
             state: state,
-            collapsedSize: placement.collapsedSize,
-            expandedSize: placement.expandedSize
+            layout: layoutModel
         ))
         hosting.frame = NSRect(origin: .zero, size: placement.panelFrame.size)
         hosting.autoresizingMask = [.width, .height]
@@ -58,7 +86,11 @@ final class NotchWindowController: NSObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.reposition()
+            // Observer block isn't @MainActor-typed but we registered it
+            // on the main queue, so this is safe.
+            MainActor.assumeIsolated {
+                self?.reposition()
+            }
         }
 
         state.$isPinned
@@ -100,6 +132,20 @@ final class NotchWindowController: NSObject {
             }
             .store(in: &cancellables)
 
+        // Observe ambient toggles. When either flips, recompute the expanded
+        // size, push it into the layout model (SwiftUI reflows the dashboard),
+        // and animate the NSPanel frame to match. Same scheduler hop as above
+        // so we never run inside a layout pass.
+        ambient.$showCalendar
+            .combineLatest(ambient.$showReminders)
+            .removeDuplicates(by: ==)
+            .dropFirst()  // initial value already applied above via show()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.applyAmbientReflow()
+            }
+            .store(in: &cancellables)
+
         let monitor = EventMonitor(mask: .mouseMoved) { [weak self] _ in
             self?.handleMouseMoved()
         }
@@ -121,11 +167,43 @@ final class NotchWindowController: NSObject {
     }
 
     private func reposition() {
-        guard let placement = NotchGeometry.placement() else { return }
+        let expanded = computeExpandedSize()
+        guard let placement = NotchGeometry.placement(expandedSize: expanded) else { return }
+        layoutModel.expandedSize = placement.expandedSize
         expandedPanelFrame = placement.panelFrame
         collapsedPanelFrame = pillFrame(for: placement)
         guard let panel else { return }
         panel.setFrame(state.isExpanded ? expandedPanelFrame : collapsedPanelFrame, display: true)
+    }
+
+    /// Recompute the expanded panel size from current ambient settings and
+    /// resize. When collapsed: just stash the new size for next expand.
+    /// When expanded: animate to the new frame in step with the SwiftUI
+    /// reflow inside (same easeInOut, same duration).
+    private func applyAmbientReflow() {
+        let expanded = computeExpandedSize()
+        guard let placement = NotchGeometry.placement(expandedSize: expanded) else { return }
+        layoutModel.expandedSize = placement.expandedSize
+        expandedPanelFrame = placement.panelFrame
+        // collapsedPanelFrame doesn't depend on expanded size — pill width is
+        // driven by the collapsed notch dimensions, unchanged here.
+        guard state.isExpanded, let panel = panel else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.35
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(expandedPanelFrame, display: true)
+        }
+    }
+
+    /// Expanded panel size as a function of ambient settings. Music is
+    /// always present; the bottom row (Calendar/Reminders) appears when
+    /// either toggle is on and contributes a fixed extra height. When both
+    /// toggles are off, the panel shrinks to music-only — no empty space.
+    private func computeExpandedSize() -> CGSize {
+        let width = NotchGeometry.defaultExpandedSize.width
+        let hasBottom = ambient.showCalendar || ambient.showReminders
+        let height = Self.ambientMusicHeight + (hasBottom ? Self.ambientBottomHeight : 0)
+        return CGSize(width: width, height: height)
     }
 
     /// Collapsed pill footprint in screen coordinates: just big enough to cover
@@ -147,10 +225,17 @@ final class NotchWindowController: NSObject {
     /// frame. This runs from the global mouse-moved monitor, which only fires
     /// while the cursor is over other apps — so transitions across the panel
     /// boundary are detected, but movement inside the panel doesn't churn.
+    ///
+    /// We can't use CGRect.contains directly: it treats the top/right edges as
+    /// exclusive, and macOS pins the cursor's y to screen.maxY when the user
+    /// shoves it against the menu bar edge — same value as zone.maxY, so the
+    /// very top row would never read as in-zone.
     private func handleMouseMoved() {
-        let mouseLocation = NSEvent.mouseLocation
+        let p = NSEvent.mouseLocation
         let zone = state.isExpanded ? expandedPanelFrame : collapsedPanelFrame
-        state.setHovered(zone.contains(mouseLocation))
+        let inZone = p.x >= zone.minX && p.x <= zone.maxX
+                  && p.y >= zone.minY && p.y <= zone.maxY
+        state.setHovered(inZone)
     }
 
     private func startGlobalClickMonitor() {
