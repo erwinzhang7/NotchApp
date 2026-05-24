@@ -65,11 +65,19 @@ final class CalendarService: ObservableObject {
     /// .restricted (no prompt appears, status stays the same).
     func requestAccess() async {
         do {
-            _ = try await store.requestFullAccessToEvents()
+            let granted = try await store.requestFullAccessToEvents()
+            // Use the returned Bool directly — authorizationStatus(for:) can
+            // be stale for a moment after the grant and would cause
+            // refreshIfAuthorized to skip the fetch.
+            if granted {
+                accessStatus = .fullAccess
+            } else {
+                refreshAccessStatus()
+            }
         } catch {
             NSLog("[Calendar] requestFullAccessToEvents failed: \(error.localizedDescription)")
+            refreshAccessStatus()
         }
-        refreshAccessStatus()
         refreshIfAuthorized()
     }
 

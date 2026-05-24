@@ -44,6 +44,5 @@ struct ClipboardSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 440, height: 400)
     }
 }

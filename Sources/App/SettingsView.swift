@@ -1,26 +1,46 @@
 import SwiftUI
 
-/// Root settings scene — tabbed across modules. Existing clipboard pane
-/// stays as-is; new Ambient pane bundles the dashboard toggles, calendar
-/// picker, and reminders list picker.
+/// Root settings scene — tabbed across modules.
 struct SettingsView: View {
+    @State private var tab: SettingsTab = .clipboard
+
     var body: some View {
-        TabView {
-            ClipboardSettingsView(
-                settings: ClipboardManager.shared.settings,
-                store: ClipboardManager.shared.store
-            )
-            .tabItem { Label("Clipboard", systemImage: "doc.on.clipboard") }
+        VStack(spacing: 0) {
+            // Segmented picker lives in the content area so it sits below
+            // the title bar rather than colliding with it.
+            Picker("", selection: $tab) {
+                Text("Clipboard").tag(SettingsTab.clipboard)
+                Text("Ambient").tag(SettingsTab.ambient)
+                Text("Conversion").tag(SettingsTab.conversion)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 10)
 
-            AmbientSettingsView()
-                .tabItem { Label("Ambient", systemImage: "rectangle.on.rectangle") }
+            Divider()
 
-            ConversionSettingsView()
-                .tabItem { Label("Conversion", systemImage: "arrow.triangle.2.circlepath") }
+            Group {
+                switch tab {
+                case .clipboard:
+                    ClipboardSettingsView(
+                        settings: ClipboardManager.shared.settings,
+                        store: ClipboardManager.shared.store
+                    )
+                case .ambient:
+                    AmbientSettingsView()
+                case .conversion:
+                    ConversionSettingsView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 520, height: 520)
+        .frame(width: 520, height: 540)
     }
 }
+
+private enum SettingsTab { case clipboard, ambient, conversion }
 
 /// Ambient pane: toggles for the optional bottom row + the calendar /
 /// reminders pickers. Built as a Form (matching ClipboardSettingsView) —

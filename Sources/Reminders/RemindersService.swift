@@ -62,10 +62,18 @@ final class RemindersService: ObservableObject {
         do {
             let granted = try await store.requestFullAccessToReminders()
             NSLog("[Reminders] requestFullAccessToReminders returned granted=\(granted)")
+            // Use the returned Bool directly — authorizationStatus(for:) can
+            // be stale for a moment after the grant and would cause
+            // refreshIfAuthorized to skip the fetch.
+            if granted {
+                accessStatus = .fullAccess
+            } else {
+                refreshAccessStatus()
+            }
         } catch {
             NSLog("[Reminders] requestFullAccessToReminders threw: \(error.localizedDescription)")
+            refreshAccessStatus()
         }
-        refreshAccessStatus()
         refreshIfAuthorized()
     }
 
