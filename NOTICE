@@ -1,0 +1,74 @@
+NotchApp — Third-Party Component Notices
+=========================================
+
+This file lists third-party components included in or referenced by NotchApp,
+along with their licenses and the nature of their use.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. mediaremote-adapter  [BUNDLED]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Location:  Vendor/MediaRemoteAdapter/
+Use:       Bundled and distributed inside NotchApp.app. The Perl script
+           (mediaremote-adapter.pl) and companion MediaRemoteAdapter.framework
+           are spawned as a subprocess at runtime to bridge the macOS 15.4+
+           MediaRemote entitlement lockdown.
+
+License:   BSD 3-Clause
+Copyright: (c) 2025, Jonas van den Berg and contributors
+
+Full license text is reproduced in
+Vendor/MediaRemoteAdapter/MediaRemoteAdapter-LICENSE.txt and is included in
+the app bundle at build time.
+
+BSD 3-Clause License
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+   this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+   may be used to endorse or promote products derived from this software
+   without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. NotchDrop  [INSPIRATION — NOT COPIED]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Source:    https://github.com/Lakr233/NotchDrop
+Use:       Referenced for architectural inspiration (notch-panel shell,
+           file shelf approach). No source code from NotchDrop is copied
+           or included in NotchApp.
+License:   MIT
+Copyright: (c) Lakr233 and contributors
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. boringNotch  [REFERENCED — NOT COPIED, NOT LINKED]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Source:    https://github.com/TheBoredTeam/boring.notch
+Use:       Referenced for media integration approach during development.
+           No source code from boringNotch is copied, included, or linked
+           into NotchApp. The GPL-2.0 license does not propagate to NotchApp.
+License:   GPL-2.0
+Copyright: (c) TheBoredTeam and contributors
