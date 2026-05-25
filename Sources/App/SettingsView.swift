@@ -63,6 +63,25 @@ struct AmbientSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Ambient Screen") {
+                Toggle("Enable Ambient Screen", isOn: $ambient.ambientScreenEnabled)
+                Toggle("Show after inactivity", isOn: $ambient.ambientScreenTriggerOnIdle)
+                    .disabled(!ambient.ambientScreenEnabled)
+                Stepper(
+                    value: $ambient.ambientScreenIdleTimeoutSeconds,
+                    in: 10...3600,
+                    step: 30
+                ) {
+                    Text("Idle timeout: \(ambient.ambientScreenIdleTimeoutSeconds)s")
+                }
+                .disabled(!ambient.ambientScreenEnabled || !ambient.ambientScreenTriggerOnIdle)
+                Toggle("Dismiss on activity", isOn: $ambient.ambientScreenDismissOnActivity)
+                    .disabled(!ambient.ambientScreenEnabled)
+                Text("Open anytime with ⌃⌥⌘A or the menu-bar item. Calendar / Reminders cards mirror the toggles above.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Calendars") {
                 CalendarSettingsView(
                     service: calendarService,
