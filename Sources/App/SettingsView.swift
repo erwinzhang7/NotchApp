@@ -2,15 +2,15 @@ import SwiftUI
 
 /// Root settings scene — tabbed across modules.
 struct SettingsView: View {
-    @State private var tab: SettingsTab = .clipboard
+    @State private var tab: SettingsTab = .ambient
 
     var body: some View {
         VStack(spacing: 0) {
             // Segmented picker lives in the content area so it sits below
             // the title bar rather than colliding with it.
             Picker("", selection: $tab) {
-                Text("Clipboard").tag(SettingsTab.clipboard)
                 Text("Ambient").tag(SettingsTab.ambient)
+                Text("Clipboard").tag(SettingsTab.clipboard)
                 Text("Conversion").tag(SettingsTab.conversion)
             }
             .pickerStyle(.segmented)
@@ -73,7 +73,25 @@ struct AmbientSettingsView: View {
                     Text("Idle timeout: \(ambient.lockScreenWidgetIdleTimeoutSeconds)s")
                 }
                 .disabled(!ambient.lockScreenWidgetEnabled)
-                Text("Small music card centered above the lock screen, also shown when the Mac has been idle for the timeout above. Hidden while you're using the Mac. Uses a private macOS API and may break in future macOS updates.")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Vertical position")
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.up")
+                            .foregroundStyle(.secondary)
+                        Slider(
+                            value: $ambient.lockScreenWidgetVerticalOffset,
+                            in: -100...100
+                        )
+                        Image(systemName: "arrow.down")
+                            .foregroundStyle(.secondary)
+                        Button("Center") {
+                            ambient.lockScreenWidgetVerticalOffset = 0
+                        }
+                        .disabled(ambient.lockScreenWidgetVerticalOffset == 0)
+                    }
+                }
+                .disabled(!ambient.lockScreenWidgetEnabled)
+                Text("Small music card centered horizontally above the lock screen, also shown when the Mac has been idle for the timeout above. Hidden while you're using the Mac. Uses a private macOS API and may break in future macOS updates.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

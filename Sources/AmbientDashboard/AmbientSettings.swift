@@ -28,11 +28,18 @@ final class AmbientSettings: ObservableObject {
         didSet { UserDefaults.standard.set(lockScreenWidgetIdleTimeoutSeconds, forKey: Keys.lockScreenWidgetIdleTimeoutSeconds) }
     }
 
+    /// Vertical offset for the lock-screen widget, in points, from the
+    /// screen center. Positive = down, negative = up. 0 = dead center.
+    @Published var lockScreenWidgetVerticalOffset: Double {
+        didSet { UserDefaults.standard.set(lockScreenWidgetVerticalOffset, forKey: Keys.lockScreenWidgetVerticalOffset) }
+    }
+
     private enum Keys {
         static let showCalendar                       = "ambient.showCalendar"
         static let showReminders                      = "ambient.showReminders"
         static let lockScreenWidgetEnabled            = "lockScreenWidget.enabled"
         static let lockScreenWidgetIdleTimeoutSeconds = "lockScreenWidget.idleTimeoutSeconds"
+        static let lockScreenWidgetVerticalOffset     = "lockScreenWidget.verticalOffset"
     }
 
     init() {
@@ -42,10 +49,12 @@ final class AmbientSettings: ObservableObject {
             Keys.showReminders:                      true,
             Keys.lockScreenWidgetEnabled:            false,
             Keys.lockScreenWidgetIdleTimeoutSeconds: 180,
+            Keys.lockScreenWidgetVerticalOffset:     0,
         ])
         self.showCalendar                       = defaults.bool(forKey: Keys.showCalendar)
         self.showReminders                      = defaults.bool(forKey: Keys.showReminders)
         self.lockScreenWidgetEnabled            = defaults.bool(forKey: Keys.lockScreenWidgetEnabled)
         self.lockScreenWidgetIdleTimeoutSeconds = defaults.integer(forKey: Keys.lockScreenWidgetIdleTimeoutSeconds)
+        self.lockScreenWidgetVerticalOffset     = defaults.double(forKey: Keys.lockScreenWidgetVerticalOffset)
     }
 }

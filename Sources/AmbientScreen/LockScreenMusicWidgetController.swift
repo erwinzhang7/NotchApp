@@ -41,6 +41,10 @@ final class LockScreenMusicWidgetController {
                 self?.idleMonitor.threshold = TimeInterval(secs)
             }
             .store(in: &cancellables)
+        ambient.$lockScreenWidgetVerticalOffset
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.recenter() }
+            .store(in: &cancellables)
     }
 
     func stop() {
@@ -106,16 +110,35 @@ final class LockScreenMusicWidgetController {
         }
     }
 
-    /// Move the panel back to the screen's center. Called when the
-    /// display geometry changes.
+    /// Reposition the panel using the current settings (vertical offset
+    /// from center). Called at launch, on screen-config changes, and
+    /// whenever the offset slider moves.
     private func recenter() {
         guard let panel, let screen = NSScreen.main?.frame else { return }
         let size = Self.panelSize
-        let origin = NSPoint(
-            x: screen.midX - size.width / 2,
-            y: screen.midY - size.height / 2
+        panel.setFrame(
+            NSRect(origin: position(on: screen, size: size), size: size),
+            display: true
         )
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
+    }
+
+    /// Compute the panel origin. Centered horizontally; vertical position
+    /// is center + the user's offset (slider: left = up, right = down).
+    /// Clamps to keep the panel on-screen on shorter displays.
+    private func position(on screen: NSRect, size: NSSize) -> NSPoint {
+        let topMargin: CGFloat = 20
+
+        let x = screen.midX - size.width / 2
+
+        // Slider value: > 0 = down visually = lower Y in AppKit.
+        let offset = CGFloat(ambient.lockScreenWidgetVerticalOffset)
+        let desiredY = screen.midY - size.height / 2 - offset
+
+        // Keep the panel fully on-screen.
+        let maxY = screen.maxY - size.height - topMargin
+        let minY = screen.minY + topMargin
+        let y = min(max(desiredY, minY), maxY)
+        return NSPoint(x: x, y: y)
     }
 
     private func refreshVisibility() {
@@ -132,13 +155,10 @@ final class LockScreenMusicWidgetController {
 
     private func makePanel() -> NSPanel {
         let size = Self.panelSize
-        // Center on the main screen at launch; SkyLight space pins it
-        // there across spaces.
+        // Position the widget per current settings (center + user offset).
+        // SkyLight space pins it there across spaces.
         let screen = NSScreen.main?.frame ?? .zero
-        let origin = NSPoint(
-            x: screen.midX - size.width / 2,
-            y: screen.midY - size.height / 2
-        )
+        let origin = position(on: screen, size: size)
         let p = NSPanel(
             contentRect: NSRect(origin: origin, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
