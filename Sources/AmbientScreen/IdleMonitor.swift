@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import IOKit
+import IOKit.pwr_mgt
 
 /// Reports when the user has been idle (no HID input) for at least
 /// `threshold` seconds, then again when activity resumes. Polls the
@@ -52,11 +53,39 @@ final class IdleMonitor {
 
     private func tick() {
         let idle = Self.systemIdleSeconds()
-        let nowIdle = idle >= threshold
+        var nowIdle = idle >= threshold
+        // Even if HIDIdleTime is past the threshold, treat the Mac as
+        // active when any IOKit assertion is preventing user-idle sleep
+        // (caffeinate -d/-i, a running download in some apps, the user
+        // explicitly declaring activity). Avoids the widget popping up
+        // when the user has intentionally kept the screen on but isn't
+        // touching the keyboard.
+        if nowIdle, Self.hasPreventIdleAssertion() {
+            nowIdle = false
+        }
         if nowIdle != wasIdle {
             wasIdle = nowIdle
             if nowIdle { onIdle?() } else { onActive?() }
         }
+    }
+
+    /// True if any active assertion is preventing user-idle sleep or
+    /// declaring the user active. `caffeinate -d` creates
+    /// `PreventUserIdleDisplaySleep`; `-i` creates
+    /// `PreventUserIdleSystemSleep`; `-u` (and many APIs that ping for
+    /// activity) create `UserIsActive`.
+    static func hasPreventIdleAssertion() -> Bool {
+        var raw: Unmanaged<CFDictionary>?
+        let result = IOPMCopyAssertionsStatus(&raw)
+        guard result == kIOReturnSuccess,
+              let dict = raw?.takeRetainedValue() as? [String: Int]
+        else { return false }
+        let blockers = [
+            "PreventUserIdleSystemSleep",
+            "PreventUserIdleDisplaySleep",
+            "UserIsActive",
+        ]
+        return blockers.contains { (dict[$0] ?? 0) > 0 }
     }
 
     /// Seconds since last HID event. Returns 0 if the service is

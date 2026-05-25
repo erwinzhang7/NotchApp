@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -7,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var historyWindow = ClipboardHistoryWindowController(store: ClipboardManager.shared.store)
     private lazy var settingsWindow = SettingsWindowController()
     private var statusItem: NSStatusItem?
+    private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -21,7 +23,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = RemindersManager.shared
         _ = ConversionManager.shared
         lockScreenWidget.start()
-        installStatusItem()
+
+        // Install / remove the status-bar item live in response to the
+        // user toggling "Show in Menu Bar" (toggle lives in the notch
+        // panel's right-click menu).
+        let ambient = AmbientSettings.shared
+        applyMenuBarVisibility(ambient.showInMenuBar)
+        ambient.$showInMenuBar
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] visible in self?.applyMenuBarVisibility(visible) }
+            .store(in: &cancellables)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -32,9 +43,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Status-bar launcher
-    // Temporary entry point: this LSUIElement app has no dock icon and the notch shell doesn't
-    // yet host the launcher UI. The status item gives the user a way to reach Settings and the
-    // History window. Remove once NotchShell mounts those affordances.
+    //
+    // Optional entry point: this LSUIElement app has no dock icon. When
+    // the user disables the status item the same actions remain reachable
+    // through the notch panel's right-click context menu.
+
+    private func applyMenuBarVisibility(_ visible: Bool) {
+        if visible {
+            if statusItem == nil { installStatusItem() }
+        } else {
+            removeStatusItem()
+        }
+    }
+
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
@@ -53,6 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         historyItem.target = self
         menu.addItem(historyItem)
 
+        let hideItem = NSMenuItem(title: "Hide Menu Bar Icon", action: #selector(hideMenuBarIcon), keyEquivalent: "")
+        hideItem.target = self
+        menu.addItem(hideItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit NotchApp", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -62,7 +87,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
-    @objc private func openSettings() {
+    private func removeStatusItem() {
+        guard let item = statusItem else { return }
+        NSStatusBar.system.removeStatusItem(item)
+        statusItem = nil
+    }
+
+    // MARK: - Actions
+    //
+    // Exposed (internal) so the notch panel's right-click menu can fire
+    // them via NSApp.delegate without the responder-chain dance.
+
+    @objc func openSettings() {
         // Skip NSApp.sendAction(Selector("showSettingsWindow:"), …): on
         // macOS 26 from an LSUIElement agent the SwiftUI Settings scene
         // isn't reachable via the responder chain (no key window to anchor
@@ -71,7 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsWindow.show()
     }
 
-    @objc private func showHistory() {
+    @objc func showHistory() {
         historyWindow.show()
+    }
+
+    @objc func hideMenuBarIcon() {
+        AmbientSettings.shared.showInMenuBar = false
     }
 }

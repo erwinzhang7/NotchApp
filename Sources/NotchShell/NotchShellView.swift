@@ -11,6 +11,7 @@ struct NotchShellView: View {
     @ObservedObject var layout: NotchLayoutModel
 
     @AppStorage("notch.selectedTab") private var selectedTab: NotchTab = .ambient
+    @ObservedObject private var appSettings = AmbientSettings.shared
 
     /// Must stay in sync with NotchGeometry.hoverSlop.
     private let hoverSlop: CGFloat = 5
@@ -93,6 +94,10 @@ struct NotchShellView: View {
         // would fire inside the SwiftUI layout pass and re-trigger the
         // panel-resize sink during layout, which AppKit forbids.
         .onTapGesture { state.togglePinned() }
+        // Right-click anywhere on the visible notch surface for the launcher
+        // menu. With the menu-bar icon hidden, this is the user's path
+        // back to Settings and to re-showing the icon.
+        .contextMenu { notchContextMenu }
         // Same easing as NotchWindowController's window-frame animation so the
         // SwiftUI content edge and the NSPanel edge advance together — no
         // gap above or below the panel mid-animation.
@@ -116,6 +121,22 @@ struct NotchShellView: View {
             }
             return true
         }
+    }
+
+    /// Right-click launcher menu. Mirrors the menu-bar icon's items so
+    /// the user can still reach Settings / History / quit with the icon
+    /// hidden, plus a checkable "Show in Menu Bar" to bring it back.
+    @ViewBuilder
+    private var notchContextMenu: some View {
+        Button("Open Settings…") {
+            (NSApp.delegate as? AppDelegate)?.openSettings()
+        }
+        Button("Show Clipboard History") {
+            (NSApp.delegate as? AppDelegate)?.showHistory()
+        }
+        Toggle("Show in Menu Bar", isOn: $appSettings.showInMenuBar)
+        Divider()
+        Button("Quit NotchApp") { NSApp.terminate(nil) }
     }
 
     @ViewBuilder
