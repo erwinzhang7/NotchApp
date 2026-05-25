@@ -34,9 +34,6 @@ struct AmbientDashboardView: View {
             .frame(height: Self.musicHeight)
 
             if showBottomRow {
-                Rectangle()
-                    .fill(Color.white.opacity(0.08))
-                    .frame(height: 0.5)
                 bottomRow
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.opacity)

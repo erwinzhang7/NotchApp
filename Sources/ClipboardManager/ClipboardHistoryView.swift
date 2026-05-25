@@ -67,17 +67,26 @@ struct ClipboardHistoryView: View {
         } else {
             List {
                 ForEach(visible) { item in
-                    ClipboardRowView(item: item, isJustCopied: lastCopiedID == item.id)
-                        .contentShape(Rectangle())
-                        .onTapGesture { copy(item) }
-                        .contextMenu {
-                            Button("Copy") { copy(item) }
-                            Button("Remove", role: .destructive) { store.remove(item) }
-                        }
-                        // Per-row clear background so the only fill is
-                        // the row's own justCopied green flash; List's
-                        // default row tint can't peek through.
-                        .listRowBackground(Color.clear)
+                    // Button (plain style) instead of onTapGesture: SwiftUI
+                    // List on macOS swallows single taps from .onTapGesture
+                    // for its own row-selection handling, so a plain click
+                    // never reached copy(). Buttons take a different event
+                    // path that the List honors on the first click.
+                    Button {
+                        copy(item)
+                    } label: {
+                        ClipboardRowView(item: item, isJustCopied: lastCopiedID == item.id)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .contextMenu {
+                        Button("Copy") { copy(item) }
+                        Button("Remove", role: .destructive) { store.remove(item) }
+                    }
+                    // Per-row clear background so the only fill is
+                    // the row's own justCopied green flash; List's
+                    // default row tint can't peek through.
+                    .listRowBackground(Color.clear)
                 }
             }
             .listStyle(.inset)

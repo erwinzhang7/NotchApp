@@ -65,6 +65,11 @@ struct NotchShellView: View {
                 }
             }
             .frame(width: canvasWidth, height: size.height)
+            // Clip tab contents to the panel outline. Without this, child
+            // views that paint their own rectangular backgrounds (e.g. the
+            // Clip tab's Color.black layers) bleed past the swept top
+            // corners and the rounded bottom corners.
+            .clipShape(panelShape)
             // Border on left / right / bottom only. The top edge would look like a seam
             // against the screen top, so we mask the top 1.5pt of the stroke out — the
             // tiny gap at the very top of the L/R edges falls behind the physical notch
@@ -88,8 +93,15 @@ struct NotchShellView: View {
         // would fire inside the SwiftUI layout pass and re-trigger the
         // panel-resize sink during layout, which AppKit forbids.
         .onTapGesture { state.togglePinned() }
-        .animation(.spring(response: 0.4, dampingFraction: 0.75), value: isExpanded)
+        // Same easing as NotchWindowController's window-frame animation so the
+        // SwiftUI content edge and the NSPanel edge advance together — no
+        // gap above or below the panel mid-animation.
+        .animation(.easeOut(duration: 0.32), value: isExpanded)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The panel window's top edge sits flush with the screen top. Without
+        // this, SwiftUI's automatic top safe-area inset (notch height) pushes
+        // the content down and leaves a visible gap above the panel.
+        .ignoresSafeArea(.all, edges: .top)
         // Panel-wide drop catcher. The NSPanel frame is always sized for the expanded
         // surface + slop (~528×424), so this drop zone exists whether or not the SwiftUI
         // content is currently in its collapsed pill — that's how a drag toward a
@@ -110,10 +122,6 @@ struct NotchShellView: View {
     private func expandedContent(notchHeight: CGFloat, notchWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
             tabStrip(notchHeight: notchHeight, notchWidth: notchWidth)
-
-            Rectangle()
-                .fill(Color.white.opacity(0.08))
-                .frame(height: 0.5)
 
             tabContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

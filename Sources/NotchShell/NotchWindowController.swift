@@ -66,18 +66,26 @@ final class NotchWindowController: NSObject {
         expandedPanelFrame = placement.panelFrame
         collapsedPanelFrame = pillFrame(for: placement)
 
-        let panel = NotchPanel(contentRect: placement.panelFrame)
-        let hosting = NSHostingView(rootView: NotchShellView(
+        // Create the panel at the exact frame it should appear at, so the
+        // first paint lands at the centered collapsed position rather than
+        // the contentRect-derived expanded frame (which produced a brief
+        // off-center slide on launch).
+        let initialFrame = state.isExpanded ? expandedPanelFrame : collapsedPanelFrame
+        let panel = NotchPanel(contentRect: initialFrame)
+        // FirstMouseHostingView overrides acceptsFirstMouse so clicks on
+        // SwiftUI rows register on the first click even when the panel
+        // isn't key — without this, the first click on a Clip row gets
+        // consumed activating the non-activating panel and the tap never
+        // fires (right-click works because context menus take a different
+        // event path).
+        let hosting = FirstMouseHostingView(rootView: NotchShellView(
             state: state,
             layout: layoutModel
         ))
-        hosting.frame = NSRect(origin: .zero, size: placement.panelFrame.size)
+        hosting.frame = NSRect(origin: .zero, size: initialFrame.size)
         hosting.autoresizingMask = [.width, .height]
         panel.contentView = hosting
 
-        // Start at the correct size before showing so the panel never flashes at
-        // expanded size on launch.
-        panel.setFrame(state.isExpanded ? expandedPanelFrame : collapsedPanelFrame, display: false)
         panel.orderFrontRegardless()
         self.panel = panel
 
@@ -120,14 +128,17 @@ final class NotchWindowController: NSObject {
             .sink { [weak self] isExpanded in
                 guard let self, let panel = self.panel else { return }
                 let target = isExpanded ? self.expandedPanelFrame : self.collapsedPanelFrame
-                if isExpanded {
-                    panel.setFrame(target, display: true)
-                } else {
-                    NSAnimationContext.runAnimationGroup { context in
-                        context.duration = 0.4
-                        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                        panel.animator().setFrame(target, display: true)
-                    }
+                // Animate the window resize in lockstep with the SwiftUI
+                // panel-shape resize so they grow/shrink together. Same
+                // duration and easing as NotchShellView's `.animation(...)`
+                // on isExpanded — keeps the window frame and the SwiftUI
+                // content edge-locked at every animation tick, so no
+                // transparent gap appears above or below the panel as it
+                // expands or collapses.
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.32
+                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    panel.animator().setFrame(target, display: true)
                 }
             }
             .store(in: &cancellables)
