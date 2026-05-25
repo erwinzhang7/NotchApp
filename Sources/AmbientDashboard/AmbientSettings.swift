@@ -1,8 +1,8 @@
 import Combine
 import Foundation
 
-/// Toggles + persistence for the ambient dashboard's optional bottom row.
-/// Music is always present (no toggle). Both bottom modules default to ON.
+/// Toggles + persistence for the ambient dashboard's optional bottom row
+/// and the lock-screen music widget.
 @MainActor
 final class AmbientSettings: ObservableObject {
     static let shared = AmbientSettings()
@@ -15,53 +15,37 @@ final class AmbientSettings: ObservableObject {
         didSet { UserDefaults.standard.set(showReminders, forKey: Keys.showReminders) }
     }
 
-    // Ambient-screen prefs: control the full-screen iPad-style display
-    // (AmbientScreenWindowController). The calendar / reminders visibility
-    // toggles above are shared with the notch's Ambient tab — what you see
-    // there also shows in the ambient screen.
-
-    @Published var ambientScreenEnabled: Bool {
-        didSet { UserDefaults.standard.set(ambientScreenEnabled, forKey: Keys.ambientScreenEnabled) }
+    /// Master toggle for the small SkyLight-backed widget that shows the
+    /// music card above the macOS lock screen. Opt-in because it uses a
+    /// private API.
+    @Published var lockScreenWidgetEnabled: Bool {
+        didSet { UserDefaults.standard.set(lockScreenWidgetEnabled, forKey: Keys.lockScreenWidgetEnabled) }
     }
 
-    @Published var ambientScreenTriggerOnIdle: Bool {
-        didSet { UserDefaults.standard.set(ambientScreenTriggerOnIdle, forKey: Keys.ambientScreenTriggerOnIdle) }
-    }
-
-    @Published var ambientScreenIdleTimeoutSeconds: Int {
-        didSet { UserDefaults.standard.set(ambientScreenIdleTimeoutSeconds, forKey: Keys.ambientScreenIdleTimeoutSeconds) }
-    }
-
-    @Published var ambientScreenDismissOnActivity: Bool {
-        didSet { UserDefaults.standard.set(ambientScreenDismissOnActivity, forKey: Keys.ambientScreenDismissOnActivity) }
+    /// Seconds of HID inactivity before the lock-screen widget shows on
+    /// the desktop (it always shows when the Mac is actually locked).
+    @Published var lockScreenWidgetIdleTimeoutSeconds: Int {
+        didSet { UserDefaults.standard.set(lockScreenWidgetIdleTimeoutSeconds, forKey: Keys.lockScreenWidgetIdleTimeoutSeconds) }
     }
 
     private enum Keys {
-        static let showCalendar  = "ambient.showCalendar"
-        static let showReminders = "ambient.showReminders"
-        static let ambientScreenEnabled            = "ambientScreen.enabled"
-        static let ambientScreenTriggerOnIdle      = "ambientScreen.triggerOnIdle"
-        static let ambientScreenIdleTimeoutSeconds = "ambientScreen.idleTimeoutSeconds"
-        static let ambientScreenDismissOnActivity  = "ambientScreen.dismissOnActivity"
+        static let showCalendar                       = "ambient.showCalendar"
+        static let showReminders                      = "ambient.showReminders"
+        static let lockScreenWidgetEnabled            = "lockScreenWidget.enabled"
+        static let lockScreenWidgetIdleTimeoutSeconds = "lockScreenWidget.idleTimeoutSeconds"
     }
 
     init() {
         let defaults = UserDefaults.standard
-        // First-launch defaults. UserDefaults returns false / 0 for missing
-        // keys so register them explicitly.
         defaults.register(defaults: [
-            Keys.showCalendar:  true,
-            Keys.showReminders: true,
-            Keys.ambientScreenEnabled:            true,
-            Keys.ambientScreenTriggerOnIdle:      true,
-            Keys.ambientScreenIdleTimeoutSeconds: 180,
-            Keys.ambientScreenDismissOnActivity:  true,
+            Keys.showCalendar:                       true,
+            Keys.showReminders:                      true,
+            Keys.lockScreenWidgetEnabled:            false,
+            Keys.lockScreenWidgetIdleTimeoutSeconds: 180,
         ])
-        self.showCalendar  = defaults.bool(forKey: Keys.showCalendar)
-        self.showReminders = defaults.bool(forKey: Keys.showReminders)
-        self.ambientScreenEnabled            = defaults.bool(forKey: Keys.ambientScreenEnabled)
-        self.ambientScreenTriggerOnIdle      = defaults.bool(forKey: Keys.ambientScreenTriggerOnIdle)
-        self.ambientScreenIdleTimeoutSeconds = defaults.integer(forKey: Keys.ambientScreenIdleTimeoutSeconds)
-        self.ambientScreenDismissOnActivity  = defaults.bool(forKey: Keys.ambientScreenDismissOnActivity)
+        self.showCalendar                       = defaults.bool(forKey: Keys.showCalendar)
+        self.showReminders                      = defaults.bool(forKey: Keys.showReminders)
+        self.lockScreenWidgetEnabled            = defaults.bool(forKey: Keys.lockScreenWidgetEnabled)
+        self.lockScreenWidgetIdleTimeoutSeconds = defaults.integer(forKey: Keys.lockScreenWidgetIdleTimeoutSeconds)
     }
 }

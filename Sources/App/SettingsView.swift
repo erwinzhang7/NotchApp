@@ -63,21 +63,17 @@ struct AmbientSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Ambient Screen") {
-                Toggle("Enable Ambient Screen", isOn: $ambient.ambientScreenEnabled)
-                Toggle("Show after inactivity", isOn: $ambient.ambientScreenTriggerOnIdle)
-                    .disabled(!ambient.ambientScreenEnabled)
+            Section("Lock Screen Music Widget") {
+                Toggle("Show music on lock screen", isOn: $ambient.lockScreenWidgetEnabled)
                 Stepper(
-                    value: $ambient.ambientScreenIdleTimeoutSeconds,
+                    value: $ambient.lockScreenWidgetIdleTimeoutSeconds,
                     in: 10...3600,
                     step: 30
                 ) {
-                    Text("Idle timeout: \(ambient.ambientScreenIdleTimeoutSeconds)s")
+                    Text("Idle timeout: \(ambient.lockScreenWidgetIdleTimeoutSeconds)s")
                 }
-                .disabled(!ambient.ambientScreenEnabled || !ambient.ambientScreenTriggerOnIdle)
-                Toggle("Dismiss on activity", isOn: $ambient.ambientScreenDismissOnActivity)
-                    .disabled(!ambient.ambientScreenEnabled)
-                Text("Open anytime with ⌃⌥⌘A or the menu-bar item. Calendar / Reminders cards mirror the toggles above.")
+                .disabled(!ambient.lockScreenWidgetEnabled)
+                Text("Small music card centered above the lock screen, also shown when the Mac has been idle for the timeout above. Hidden while you're using the Mac. Uses a private macOS API and may break in future macOS updates.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -99,3 +95,4 @@ struct AmbientSettingsView: View {
         .formStyle(.grouped)
     }
 }
+

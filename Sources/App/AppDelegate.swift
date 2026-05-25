@@ -3,7 +3,7 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notchController = NotchWindowController()
-    private let ambientScreen = AmbientScreenWindowController()
+    private let lockScreenWidget = LockScreenMusicWidgetController()
     private lazy var historyWindow = ClipboardHistoryWindowController(store: ClipboardManager.shared.store)
     private lazy var settingsWindow = SettingsWindowController()
     private var statusItem: NSStatusItem?
@@ -20,14 +20,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = CalendarManager.shared
         _ = RemindersManager.shared
         _ = ConversionManager.shared
-        ambientScreen.start()
+        lockScreenWidget.start()
         installStatusItem()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         ClipboardManager.shared.monitor.stop()
         MediaControls.shared.adapter.stop()
-        ambientScreen.stop()
+        lockScreenWidget.stop()
         notchController.hide()
     }
 
@@ -53,11 +53,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         historyItem.target = self
         menu.addItem(historyItem)
 
-        let ambientItem = NSMenuItem(title: "Show Ambient Display", action: #selector(showAmbient), keyEquivalent: "a")
-        ambientItem.keyEquivalentModifierMask = [.control, .option, .command]
-        ambientItem.target = self
-        menu.addItem(ambientItem)
-
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit NotchApp", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -78,9 +73,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showHistory() {
         historyWindow.show()
-    }
-
-    @objc private func showAmbient() {
-        ambientScreen.toggle()
     }
 }
