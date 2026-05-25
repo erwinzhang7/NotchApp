@@ -1,78 +1,121 @@
+import AppKit
 import SwiftUI
 
-/// Large iPad-style now-playing card for the ambient screen. Same data
-/// source as NowPlayingView (NowPlayingState + MediaRemoteAdapter) but
-/// scaled up: large square artwork, big title/artist, full scrubber, and
-/// always-visible transport controls.
-struct BigNowPlayingView: View {
+/// Bridge from NSVisualEffectView into SwiftUI for the glass background.
+/// Applies the rounded-corner mask at the CALayer level. SwiftUI's
+/// `.clipShape` does not clip AppKit-backed `NSViewRepresentable` content
+/// — it leaves a square rectangle visible behind the SwiftUI rounded
+/// shape, which read as a second outer layer.
+private struct VisualEffectBlur: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+    var cornerRadius: CGFloat = 0
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = material
+        v.blendingMode = blendingMode
+        v.state = .active
+        v.isEmphasized = false
+        v.wantsLayer = true
+        v.layer?.cornerCurve = .continuous
+        v.layer?.cornerRadius = cornerRadius
+        v.layer?.masksToBounds = true
+        return v
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+        nsView.layer?.cornerRadius = cornerRadius
+    }
+}
+
+/// Compact music card used for the lock-screen widget. Display + standard
+/// transport: previous / play-pause / next + draggable scrubber. On the
+/// actual lock screen the password sheet takes keyboard focus, but mouse
+/// events still reach our panel through the SkyLight space.
+struct LockScreenMusicCardView: View {
     @ObservedObject var state: NowPlayingState
     let adapter: MediaRemoteAdapter
 
     /// Position the user is currently dragging the scrubber to.
     @State private var dragSeconds: Double?
 
-    /// Artwork side length. Sized so the whole card fits comfortably on a
-    /// 13" MacBook screen alongside the left sidebar.
-    private let artworkSize: CGFloat = 320
+    private let artworkSize: CGFloat = 220
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 18) {
             artwork
                 .frame(width: artworkSize, height: artworkSize)
 
-            VStack(spacing: 6) {
+            VStack(spacing: 3) {
                 Text(state.hasMedia ? state.title : "Nothing playing")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Text(secondaryLabel)
-                    .font(.system(size: 15))
+                    .multilineTextAlignment(.center)
+                Text(secondary)
+                    .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
-                    .truncationMode(.tail)
+                    .multilineTextAlignment(.center)
             }
-            .multilineTextAlignment(.center)
 
             if state.hasMedia {
                 progressBar
                     .frame(width: artworkSize)
                 transportRow
+                    .padding(.top, 2)
             }
         }
-        .padding(28)
+        .padding(.vertical, 26)
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            VisualEffectBlur(
+                material: .hudWindow,
+                blendingMode: .behindWindow,
+                cornerRadius: 24
+            )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        // No SwiftUI .shadow here — the NSPanel casts a system shadow
+        // shaped to the layer-rounded hosting view (see
+        // LockScreenMusicWidgetController.makePanel).
+        .preferredColorScheme(.dark)
     }
 
-    private var secondaryLabel: String {
-        if !state.hasMedia { return state.adapterAvailable ? " " : "Media access unavailable" }
+    private var secondary: String {
+        if !state.hasMedia { return " " }
         return state.artist.isEmpty ? state.album : state.artist
     }
 
     @ViewBuilder
     private var artwork: some View {
-        if let image = state.artwork {
-            Image(nsImage: image)
+        if let img = state.artwork {
+            Image(nsImage: img)
                 .resizable()
                 .interpolation(.high)
                 .aspectRatio(contentMode: .fill)
                 .frame(width: artworkSize, height: artworkSize)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                .shadow(color: .black.opacity(0.5), radius: 30, y: 12)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .shadow(color: .black.opacity(0.5), radius: 18, y: 6)
         } else {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.white.opacity(0.06))
                 .overlay(
                     Image(systemName: "music.note")
-                        .font(.system(size: 80, weight: .light))
+                        .font(.system(size: 64, weight: .light))
                         .foregroundStyle(.white.opacity(0.35))
                 )
-                .shadow(color: .black.opacity(0.35), radius: 18, y: 6)
         }
     }
 
-    // MARK: - Scrubber (large variant of NowPlayingView's progressBar)
+    // MARK: - Scrubber (mirrors NowPlayingView's interactive bar)
 
     private var progressBar: some View {
         TimelineView(.periodic(from: .now, by: 0.5)) { _ in
@@ -80,16 +123,16 @@ struct BigNowPlayingView: View {
             let elapsed = displayedElapsed
             let progress: Double = duration > 0 ? min(max(elapsed / duration, 0), 1) : 0
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(spacing: 4) {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule()
                             .fill(Color.white.opacity(0.22))
-                            .frame(height: 4)
+                            .frame(height: 3)
                             .frame(maxHeight: .infinity)
                         Capsule()
                             .fill(Color.white)
-                            .frame(width: max(0, geo.size.width * progress), height: 4)
+                            .frame(width: max(0, geo.size.width * progress), height: 3)
                             .frame(maxHeight: .infinity)
                     }
                     .contentShape(Rectangle())
@@ -98,14 +141,14 @@ struct BigNowPlayingView: View {
                         including: state.canSeekCurrentSource ? .gesture : .none
                     )
                 }
-                .frame(height: 18)
+                .frame(height: 14)
 
                 HStack {
                     Text(format(elapsed))
                     Spacer()
                     Text(format(duration))
                 }
-                .font(.system(size: 12, weight: .medium).monospacedDigit())
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
                 .foregroundStyle(.white.opacity(0.6))
             }
         }
@@ -142,17 +185,17 @@ struct BigNowPlayingView: View {
     // MARK: - Transport
 
     private var transportRow: some View {
-        HStack(spacing: 44) {
-            transportButton(systemName: "backward.fill", size: 22) {
+        HStack(spacing: 28) {
+            transportButton(systemName: "backward.fill", size: 14) {
                 adapter.previousTrack()
             }
             transportButton(
                 systemName: state.isPlaying ? "pause.fill" : "play.fill",
-                size: 36
+                size: 20
             ) {
                 adapter.togglePlayPause()
             }
-            transportButton(systemName: "forward.fill", size: 22) {
+            transportButton(systemName: "forward.fill", size: 14) {
                 adapter.nextTrack()
             }
         }
@@ -167,7 +210,7 @@ struct BigNowPlayingView: View {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: size + 24, height: size + 14)
+                .frame(width: size + 18, height: size + 12)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
