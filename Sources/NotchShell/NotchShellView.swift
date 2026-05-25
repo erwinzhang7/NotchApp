@@ -19,12 +19,19 @@ struct NotchShellView: View {
         let isExpanded = state.isExpanded
         let size = isExpanded ? layout.expandedSize : layout.collapsedSize
         let bottomCornerRadius: CGFloat = 10
+        // Lateral extension at the top corners — the shape canvas grows by
+        // this much on each side, the body width (hitbox) stays the same.
+        let topSweep: CGFloat = 12
         let hitWidth = size.width + hoverSlop * 2
         let hitHeight = size.height + hoverSlop
+        let canvasWidth = size.width + topSweep * 2
         let notchReserveHeight = layout.collapsedSize.height
         let notchReserveWidth = layout.collapsedSize.width
 
-        let panelShape = NotchPanelShape(bottomConvexRadius: bottomCornerRadius)
+        let panelShape = NotchPanelShape(
+            topSweep: topSweep,
+            bottomConvexRadius: bottomCornerRadius
+        )
 
         ZStack(alignment: .top) {
             // Invisible hover/tap target sized slightly larger than the visible surface.
@@ -41,7 +48,11 @@ struct NotchShellView: View {
             // Opacity rather than `if isExpanded` so the spring animation
             // fades the surface in/out smoothly with the size change.
             ZStack {
+                // Fill spans the expanded canvas so the swept top corners
+                // render outside the body width into the breathing room
+                // area (which is already part of the NSPanel frame).
                 panelShape.fill(Color.black)
+                    .frame(width: canvasWidth, height: size.height)
                     .opacity(isExpanded ? 1 : 0)
 
                 if isExpanded {
@@ -49,11 +60,11 @@ struct NotchShellView: View {
                         notchHeight: notchReserveHeight,
                         notchWidth: notchReserveWidth
                     )
+                    .frame(width: size.width, height: size.height)
                     .transition(.opacity)
                 }
             }
-            .frame(width: size.width, height: size.height)
-            .clipShape(panelShape)
+            .frame(width: canvasWidth, height: size.height)
             // Border on left / right / bottom only. The top edge would look like a seam
             // against the screen top, so we mask the top 1.5pt of the stroke out — the
             // tiny gap at the very top of the L/R edges falls behind the physical notch
@@ -61,6 +72,7 @@ struct NotchShellView: View {
             .overlay(
                 panelShape
                     .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                    .frame(width: canvasWidth, height: size.height)
                     .mask(
                         VStack(spacing: 0) {
                             Color.clear.frame(height: 1.5)
