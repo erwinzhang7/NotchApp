@@ -55,15 +55,9 @@ struct ClipboardHistoryView: View {
     private var content: some View {
         let visible = store.filteredItems
         if visible.isEmpty {
-            ContentUnavailableView(
-                store.searchQuery.isEmpty ? "Nothing copied yet" : "No matches",
-                systemImage: "doc.on.clipboard",
-                description: Text(store.searchQuery.isEmpty
-                    ? "Copy something in any app — it'll appear here."
-                    : "Try a different search.")
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black)
+            EmptyClipStateView(searchQuery: store.searchQuery)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
         } else {
             List {
                 ForEach(visible) { item in

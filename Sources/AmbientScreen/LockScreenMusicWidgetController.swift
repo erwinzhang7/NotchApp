@@ -16,11 +16,16 @@ final class LockScreenMusicWidgetController {
     private let idleMonitor = IdleMonitor()
     private var panel: NSPanel?
     private var cancellables = Set<AnyCancellable>()
+    private var screenChangeObserver: NSObjectProtocol?
 
     private var locked = false
     private var idle = false
 
     private var ambient: AmbientSettings { AmbientSettings.shared }
+
+    /// Panel dimensions, tuned to fit artwork + title/artist + scrubber +
+    /// transport buttons with a comfortable margin.
+    private static let panelSize = NSSize(width: 320, height: 460)
 
     // MARK: - Lifecycle
 
@@ -76,6 +81,18 @@ final class LockScreenMusicWidgetController {
         idleMonitor.onIdle = { [weak self] in self?.idle = true; self?.refreshVisibility() }
         idleMonitor.onActive = { [weak self] in self?.idle = false; self?.refreshVisibility() }
         idleMonitor.start()
+
+        // Re-center on display config changes (resolution shift, monitor
+        // unplugged, etc.) so the widget doesn't end up off-screen.
+        if screenChangeObserver == nil {
+            screenChangeObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.recenter() }
+            }
+        }
     }
 
     private func teardown() {
@@ -83,6 +100,22 @@ final class LockScreenMusicWidgetController {
         idleMonitor.stop()
         panel?.orderOut(nil)
         panel = nil
+        if let token = screenChangeObserver {
+            NotificationCenter.default.removeObserver(token)
+            screenChangeObserver = nil
+        }
+    }
+
+    /// Move the panel back to the screen's center. Called when the
+    /// display geometry changes.
+    private func recenter() {
+        guard let panel, let screen = NSScreen.main?.frame else { return }
+        let size = Self.panelSize
+        let origin = NSPoint(
+            x: screen.midX - size.width / 2,
+            y: screen.midY - size.height / 2
+        )
+        panel.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 
     private func refreshVisibility() {
@@ -98,7 +131,7 @@ final class LockScreenMusicWidgetController {
     // MARK: - Panel
 
     private func makePanel() -> NSPanel {
-        let size = NSSize(width: 320, height: 380)
+        let size = Self.panelSize
         // Center on the main screen at launch; SkyLight space pins it
         // there across spaces.
         let screen = NSScreen.main?.frame ?? .zero
@@ -117,10 +150,17 @@ final class LockScreenMusicWidgetController {
         p.titlebarAppearsTransparent = true
         p.isOpaque = false
         p.backgroundColor = .clear
-        p.hasShadow = false
+        // Let the NSPanel draw the drop shadow itself — when the
+        // contentView is layer-backed with a rounded corner, the system
+        // shadow follows that rounded shape exactly. SwiftUI's .shadow
+        // around an AppKit-backed background was rendering the bounding
+        // rectangle, which read as the visible outer rect.
+        p.hasShadow = true
         p.isMovable = false
         p.hidesOnDeactivate = false
-        p.acceptsMouseMovedEvents = false
+        // Required so scrubber-drag and transport-button clicks register
+        // (was false because the original card was display-only).
+        p.acceptsMouseMovedEvents = true
         // Both are critical for the lock-screen path:
         //   - canBecomeVisibleWithoutLogin → window-server keeps the
         //     window around even when no user session "owns" the screen
@@ -130,11 +170,23 @@ final class LockScreenMusicWidgetController {
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         p.level = .mainMenu + 1
 
-        let host = NSHostingView(
-            rootView: LockScreenMusicCardView(state: MediaControls.shared.state)
+        let root = LockScreenMusicCardView(
+            state: MediaControls.shared.state,
+            adapter: MediaControls.shared.adapter
         )
+        // FirstMouseHostingView lets clicks register on the first hit even
+        // when the panel isn't key — same fix used for the Clip rows.
+        let host = FirstMouseHostingView(rootView: root)
         host.frame = NSRect(origin: .zero, size: size)
         host.autoresizingMask = [.width, .height]
+        // Round the hosting view at the layer level so any AppKit-drawn
+        // chrome (background colors, the panel shadow) follows the same
+        // shape as the SwiftUI card — eliminates the "outer rect" that
+        // SwiftUI's clipShape can't reach.
+        host.wantsLayer = true
+        host.layer?.cornerCurve = .continuous
+        host.layer?.cornerRadius = 24
+        host.layer?.masksToBounds = true
         p.contentView = host
         return p
     }
