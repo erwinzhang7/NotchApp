@@ -58,22 +58,25 @@ final class LockScreenMusicWidgetController {
 
     private var ambient: AmbientSettings { AmbientSettings.shared }
 
-    /// Panel dimensions for the compact card + lifted-no-lyrics layout.
-    /// Tuned to fit artwork + title/artist + scrubber + transport with a
-    /// comfortable margin.
-    private static let compactPanelSize = NSSize(width: 480, height: 540)
-    /// Wider panel for the lifted-with-lyrics layout: room for the
-    /// existing left column at unchanged sizes plus a 320pt lyrics
-    /// column with 24pt spacing and the card's 16pt outer padding on
-    /// both sides.
-    private static let lyricsPanelSize = NSSize(width: 720, height: 540)
+    /// Panel dimensions — fixed at the widest layout (lifted artwork
+    /// + lyrics column). Surrounding empty space is transparent so
+    /// the compact and lifted-no-lyrics layouts (which only use the
+    /// 320pt left column) look identical regardless of the larger
+    /// panel frame.
+    ///
+    /// **Why static**: an earlier revision flipped the panel between
+    /// 480pt and 720pt via `panel.animator().setFrame(...)` when the
+    /// lyrics column needed to appear. That triggered a SwiftUI +
+    /// NSHostingView constraint-update feedback loop (windowDidLayout
+    /// → invalidateSafeAreaInsets → requestUpdate → windowDidLayout)
+    /// which macOS now throws on as a hard NSGenericException
+    /// instead of just warning. Following the IdleNotchPill pattern
+    /// of "static panel, SwiftUI animates content inside" eliminates
+    /// the issue entirely.
+    private static let panelSize = NSSize(width: 720, height: 540)
     /// Stable consumer key the controller uses to subscribe to the
     /// lyrics service. String constant so registration is idempotent.
     private static let lyricsConsumerKey = "lockScreen"
-
-    /// Current size — flips between compact and lyrics dimensions in
-    /// response to the lift / lyrics-setting combination.
-    private var currentPanelSize: NSSize = LockScreenMusicWidgetController.compactPanelSize
 
     // MARK: - Lifecycle
 
@@ -94,15 +97,15 @@ final class LockScreenMusicWidgetController {
             .sink { [weak self] _ in self?.recenter() }
             .store(in: &cancellables)
 
-        // Lyrics-mode panel-resize: when the lifted+lyrics combination
-        // becomes active, the card needs the wider panel. Re-evaluated
-        // on either input changing; resize is animated for continuity
-        // with the artwork-lift spring.
+        // Register / unregister the lock-screen card as a lyrics
+        // consumer based on the setting. No panel-resize anymore —
+        // panel is fixed at panelSize so the SwiftUI content can
+        // animate inside without triggering the NSHostingView
+        // constraint-update feedback loop.
         ambient.$showLockScreenLyrics
-            .combineLatest(cardState.$isArtworkLifted)
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] showLyrics, isLifted in
-                self?.applyLyricsModeResize(showLyrics: showLyrics, isLifted: isLifted)
+            .sink { [weak self] showLyrics in
                 self?.applyLyricsConsumerState(showLyrics: showLyrics)
             }
             .store(in: &cancellables)
@@ -289,50 +292,14 @@ final class LockScreenMusicWidgetController {
 
     /// Reposition the panel using the current settings (vertical offset
     /// from center). Called at launch, on screen-config changes, and
-    /// whenever the offset slider moves.
+    /// whenever the offset slider moves. Panel size is fixed — only
+    /// the origin moves.
     private func recenter() {
         guard let panel, let screen = NSScreen.main?.frame else { return }
         panel.setFrame(
-            NSRect(origin: position(on: screen, size: currentPanelSize), size: currentPanelSize),
+            NSRect(origin: position(on: screen, size: Self.panelSize), size: Self.panelSize),
             display: true
         )
-    }
-
-    /// Swap panel size between the compact and lyrics dimensions.
-    /// Animated so the resize moves with the SwiftUI lift spring rather
-    /// than snapping mid-transition.
-    ///
-    /// Deferred one main-queue cycle. The sink driving this fires from
-    /// a `withAnimation { cardState.isArtworkLifted.toggle() }` inside
-    /// the SwiftUI tap handler — i.e. mid-layout-pass. Calling
-    /// `panel.animator().setFrame(...)` synchronously from there
-    /// produces the `_NSDetectedLayoutRecursion` warning. One async
-    /// hop pushes the AppKit frame change out of the SwiftUI layout
-    /// pass cleanly.
-    private func applyLyricsModeResize(showLyrics: Bool, isLifted: Bool) {
-        let start = Date()
-        let target = (showLyrics && isLifted) ? Self.lyricsPanelSize : Self.compactPanelSize
-        let changing = target != currentPanelSize
-        NSLog("[Toggle] applyLyricsModeResize showLyrics=%@ isLifted=%@ target=%.0fx%.0f changing=%@",
-              showLyrics ? "Y" : "N",
-              isLifted ? "Y" : "N",
-              target.width, target.height,
-              changing ? "Y" : "N")
-        guard changing else { return }
-        currentPanelSize = target
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self, let panel = self.panel, let screen = NSScreen.main?.frame else { return }
-            let origin = self.position(on: screen, size: target)
-            let frame = NSRect(origin: origin, size: target)
-            NSLog("[Toggle] applyLyricsModeResize -> animator().setFrame deferred %.3fs after entry",
-                  Date().timeIntervalSince(start))
-            NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = 0.42
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                panel.animator().setFrame(frame, display: true)
-            })
-        }
     }
 
     /// Register or unregister the lock-screen card as a lyrics consumer.
@@ -394,13 +361,14 @@ final class LockScreenMusicWidgetController {
               shouldShow ? "Y" : "N",
               isLockState ? "Y" : "N")
 
-        // Defense-in-depth #5: the music card panel allows mouse
-        // events for scrubber/transport in unlocked state. During
-        // lock (or pre-lock), force mouse-passthrough so the panel
-        // can never visually obscure the password field AND eat
-        // clicks meant for it. The user trades scrubber-on-lock for
-        // guaranteed lock-screen interactivity — worth it.
-        panel?.ignoresMouseEvents = isLockState
+        // Music card panel keeps `ignoresMouseEvents = false` even
+        // during lock so scrubber/transport stay interactive. The
+        // *keyboard* side is the actual lockout risk (panel grabs
+        // key window → keys don't reach loginwindow's secure input)
+        // and that's already handled by LockScreenWidgetPanel's
+        // canBecomeKey = false. Mouse events route by cursor position
+        // and do NOT interfere with loginwindow's password entry —
+        // secure input is keyboard-only.
 
         // Backdrop rides the same show/hide as the card; opacity of
         // the blurred art + tint inside is gated by isArtworkLifted.
@@ -503,7 +471,7 @@ final class LockScreenMusicWidgetController {
     // MARK: - Panel
 
     private func makePanel() -> NSPanel {
-        let size = currentPanelSize
+        let size = Self.panelSize
         // Position the widget per current settings (center + user offset).
         // SkyLight space pins it there across spaces.
         let screen = NSScreen.main?.frame ?? .zero
