@@ -16,8 +16,14 @@ final class LockScreenMusicWidgetController {
     private let idleMonitor = IdleMonitor()
     private var panel: NSPanel?
     /// Small notch-shaped widget at the screen's notch position that
-    /// displays the lock state. Same lifecycle as the music card.
+    /// displays the lock state. Same lifecycle as the music card except
+    /// on unlock — we hold the notch visible for a beat so the
+    /// `lock.fill → lock.open.fill` symbol morph can actually play, then
+    /// fade out (mirrors Atoll's `showUnlockAndScheduleHide`).
     private var lockNotchPanel: NSPanel?
+    private var lockNotchHideTask: Task<Void, Never>?
+    private let lockNotchUnlockHoldDuration: TimeInterval = 1.0
+    private let lockNotchFadeOutDuration: TimeInterval = 0.4
     private var cancellables = Set<AnyCancellable>()
     private var screenChangeObserver: NSObjectProtocol?
 
@@ -162,6 +168,8 @@ final class LockScreenMusicWidgetController {
 
     private func refreshVisibility() {
         let shouldShow = locked || idle
+
+        // Music card: simple show / hide.
         if let panel {
             if shouldShow, !panel.isVisible {
                 panel.orderFrontRegardless()
@@ -169,12 +177,49 @@ final class LockScreenMusicWidgetController {
                 panel.orderOut(nil)
             }
         }
+
+        // Lock notch: show immediately, but on hide schedule a delayed
+        // fade so the unlock symbol morph has time to play.
         if let lockNotchPanel {
-            if shouldShow, !lockNotchPanel.isVisible {
-                lockNotchPanel.orderFrontRegardless()
-            } else if !shouldShow, lockNotchPanel.isVisible {
-                lockNotchPanel.orderOut(nil)
+            if shouldShow {
+                lockNotchHideTask?.cancel()
+                lockNotchHideTask = nil
+                lockNotchPanel.alphaValue = 1
+                if !lockNotchPanel.isVisible {
+                    lockNotchPanel.orderFrontRegardless()
+                }
+            } else if lockNotchPanel.isVisible {
+                scheduleLockNotchHide()
             }
+        }
+    }
+
+    /// Keep the lock notch visible briefly after unlock so the symbol
+    /// morph plays, then fade out and orderOut. Cancelled if the Mac
+    /// re-locks (or goes idle again) during the hold.
+    private func scheduleLockNotchHide() {
+        lockNotchHideTask?.cancel()
+        lockNotchHideTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Hold visible long enough for the SF Symbol replace
+            // transition to play out.
+            try? await Task.sleep(for: .seconds(self.lockNotchUnlockHoldDuration))
+            guard !Task.isCancelled else { return }
+            // If state flipped back to should-show during the hold, bail.
+            if self.locked || self.idle { return }
+            guard let lockNotchPanel = self.lockNotchPanel,
+                  lockNotchPanel.isVisible else { return }
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = self.lockNotchFadeOutDuration
+                lockNotchPanel.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                guard let self else { return }
+                // Re-check at completion in case state flipped during the fade.
+                if !(self.locked || self.idle), self.lockNotchPanel?.isVisible == true {
+                    self.lockNotchPanel?.orderOut(nil)
+                    self.lockNotchPanel?.alphaValue = 1
+                }
+            })
         }
     }
 
@@ -252,9 +297,10 @@ final class LockScreenMusicWidgetController {
         let placement = NotchGeometry.placement()
         let notchSize = placement?.collapsedSize ?? NotchGeometry.fallbackCollapsedSize
         let screen = placement?.screen.frame ?? (NSScreen.main?.frame ?? .zero)
-        let indicatorSize = max(0, notchSize.height - 12)
+        // Total width is owned by LockNotchIndicatorView so the panel
+        // sizing and the SwiftUI layout never get out of sync.
         let totalSize = CGSize(
-            width: notchSize.width + indicatorSize * 2,
+            width: LockNotchIndicatorView.totalWidth(for: notchSize),
             height: notchSize.height
         )
         let origin = NSPoint(
