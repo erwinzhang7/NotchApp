@@ -31,62 +31,135 @@ private struct VisualEffectBlur: NSViewRepresentable {
     }
 }
 
-/// Compact music card used for the lock-screen widget. Display + standard
-/// transport: previous / play-pause / next + draggable scrubber. On the
-/// actual lock screen the password sheet takes keyboard focus, but mouse
-/// events still reach our panel through the SkyLight space.
+/// Two-state music card for the lock screen.
+///
+/// - **Compact (default)**: artwork on the left, title/artist/scrubber/
+///   transport stacked to the right. iPad-Music-style.
+/// - **Lifted**: clicking the artwork lifts it above the card as a big
+///   square; the card reflows to info-only. matchedGeometryEffect
+///   transitions the artwork between the two positions smoothly.
+///
+/// Plus: gentle "breathing" pulse on the artwork while playing, and an
+/// accent color extracted from the artwork that tints the scrubber.
 struct LockScreenMusicCardView: View {
     @ObservedObject var state: NowPlayingState
     let adapter: MediaRemoteAdapter
 
+    /// User-driven: clicking the artwork toggles whether it sits inside
+    /// the card (false) or floats above as a bigger blob (true).
+    @State private var isArtworkLifted = false
+    /// Drives the slow autoreversing scale that gives a playing track a
+    /// subtle "alive" feel.
+    @State private var pulse = false
     /// Position the user is currently dragging the scrubber to.
     @State private var dragSeconds: Double?
 
-    private let artworkSize: CGFloat = 220
+    /// Shared id so SwiftUI animates the same artwork view across the
+    /// two layouts rather than crossfading two separate views.
+    @Namespace private var artworkNamespace
+
+    private let smallArtworkSize: CGFloat = 64
+    private let bigArtworkSize: CGFloat = 320
+    /// Outer/inner padding the card uses around its content.
+    private let cardPadding: CGFloat = 16
+
+    private var accent: Color { ArtworkColor.accent(for: state.artwork) }
 
     var body: some View {
-        VStack(spacing: 18) {
-            artwork
-                .frame(width: artworkSize, height: artworkSize)
-
-            VStack(spacing: 3) {
-                Text(state.hasMedia ? state.title : "Nothing playing")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .multilineTextAlignment(.center)
-                Text(secondary)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.7))
-                    .lineLimit(1)
-                    .multilineTextAlignment(.center)
+        VStack(spacing: 14) {
+            if isArtworkLifted {
+                liftedArtwork
             }
+            card
+        }
+        .padding(cardPadding)
+        // Anchor to the bottom so the card sits at the same Y in both
+        // states: lifted state stacks the big artwork above it, compact
+        // state leaves the space above the card empty.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .preferredColorScheme(.dark)
+    }
 
-            if state.hasMedia {
-                progressBar
-                    .frame(width: artworkSize)
-                transportRow
-                    .padding(.top, 2)
+    // MARK: - Lifted artwork (state 2)
+
+    private var liftedArtwork: some View {
+        artwork(size: bigArtworkSize)
+            .matchedGeometryEffect(id: "art", in: artworkNamespace)
+            .onTapGesture { toggleLift() }
+            .transition(.scale(scale: 0.6).combined(with: .opacity))
+    }
+
+    // MARK: - Card
+
+    private var card: some View {
+        cardContent
+            .padding(cardPadding)
+            .frame(maxWidth: .infinity)
+            .background(
+                VisualEffectBlur(
+                    material: .hudWindow,
+                    blendingMode: .behindWindow,
+                    cornerRadius: 24
+                )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+            )
+    }
+
+    @ViewBuilder
+    private var cardContent: some View {
+        if isArtworkLifted {
+            // Lifted: info column only, no embedded art, centered.
+            infoColumn(centered: true)
+        } else {
+            // Compact: top row is art + title/artist side-by-side;
+            // scrubber and transport span the full card width below.
+            VStack(spacing: 10) {
+                HStack(alignment: .center, spacing: 14) {
+                    artwork(size: smallArtworkSize)
+                        .matchedGeometryEffect(id: "art", in: artworkNamespace)
+                        .onTapGesture { toggleLift() }
+                    titleArtistColumn(centered: false)
+                }
+                if state.hasMedia {
+                    progressBar
+                    transportRow(centered: true)
+                }
             }
         }
-        .padding(.vertical, 26)
-        .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(
-            VisualEffectBlur(
-                material: .hudWindow,
-                blendingMode: .behindWindow,
-                cornerRadius: 24
-            )
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
-        // No SwiftUI .shadow here — the NSPanel casts a system shadow
-        // shaped to the layer-rounded hosting view (see
-        // LockScreenMusicWidgetController.makePanel).
-        .preferredColorScheme(.dark)
+    }
+
+    @ViewBuilder
+    private func titleArtistColumn(centered: Bool) -> some View {
+        let alignment: HorizontalAlignment = centered ? .center : .leading
+        VStack(alignment: alignment, spacing: 2) {
+            Text(state.hasMedia ? state.title : "Nothing playing")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .multilineTextAlignment(centered ? .center : .leading)
+            Text(secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.7))
+                .lineLimit(1)
+                .multilineTextAlignment(centered ? .center : .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
+    }
+
+    /// Used by the lifted (art-floats-above) state: title + artist +
+    /// scrubber + transport all stacked in one centered column.
+    @ViewBuilder
+    private func infoColumn(centered: Bool) -> some View {
+        VStack(alignment: centered ? .center : .leading, spacing: 6) {
+            titleArtistColumn(centered: centered)
+            if state.hasMedia {
+                progressBar
+                transportRow(centered: centered)
+            }
+        }
     }
 
     private var secondary: String {
@@ -94,24 +167,46 @@ struct LockScreenMusicCardView: View {
         return state.artist.isEmpty ? state.album : state.artist
     }
 
+    // MARK: - Artwork (parametric)
+
     @ViewBuilder
-    private var artwork: some View {
-        if let img = state.artwork {
-            Image(nsImage: img)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fill)
-                .frame(width: artworkSize, height: artworkSize)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .shadow(color: .black.opacity(0.5), radius: 18, y: 6)
+    private func artwork(size: CGFloat) -> some View {
+        Group {
+            if let img = state.artwork {
+                Image(nsImage: img)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.1, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: size * 0.1, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+                    .overlay(
+                        Image(systemName: "music.note")
+                            .font(.system(size: size * 0.36, weight: .light))
+                            .foregroundStyle(.white.opacity(0.35))
+                    )
+                    .frame(width: size, height: size)
+            }
+        }
+        // Gentle "breathing" while playing; pauses at 1.0 when stopped.
+        .scaleEffect(state.isPlaying && pulse ? 1.02 : 1.0)
+        .onAppear { startPulseIfPlaying() }
+        .onChange(of: state.isPlaying) { _, _ in startPulseIfPlaying() }
+    }
+
+    private func startPulseIfPlaying() {
+        if state.isPlaying {
+            withAnimation(
+                .easeInOut(duration: 2.4).repeatForever(autoreverses: true)
+            ) {
+                pulse = true
+            }
         } else {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay(
-                    Image(systemName: "music.note")
-                        .font(.system(size: 64, weight: .light))
-                        .foregroundStyle(.white.opacity(0.35))
-                )
+            withAnimation(.easeOut(duration: 0.4)) {
+                pulse = false
+            }
         }
     }
 
@@ -131,7 +226,7 @@ struct LockScreenMusicCardView: View {
                             .frame(height: 3)
                             .frame(maxHeight: .infinity)
                         Capsule()
-                            .fill(Color.white)
+                            .fill(accent)
                             .frame(width: max(0, geo.size.width * progress), height: 3)
                             .frame(maxHeight: .infinity)
                     }
@@ -184,21 +279,22 @@ struct LockScreenMusicCardView: View {
 
     // MARK: - Transport
 
-    private var transportRow: some View {
-        HStack(spacing: 28) {
-            transportButton(systemName: "backward.fill", size: 14) {
+    private func transportRow(centered: Bool) -> some View {
+        HStack(spacing: 24) {
+            transportButton(systemName: "backward.fill", size: 13) {
                 adapter.previousTrack()
             }
             transportButton(
                 systemName: state.isPlaying ? "pause.fill" : "play.fill",
-                size: 20
+                size: 18
             ) {
                 adapter.togglePlayPause()
             }
-            transportButton(systemName: "forward.fill", size: 14) {
+            transportButton(systemName: "forward.fill", size: 13) {
                 adapter.nextTrack()
             }
         }
+        .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
     }
 
     private func transportButton(
@@ -210,7 +306,7 @@ struct LockScreenMusicCardView: View {
             Image(systemName: systemName)
                 .font(.system(size: size, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: size + 18, height: size + 12)
+                .frame(width: size + 16, height: size + 10)
                 .contentShape(Rectangle())
                 // Smooth icon morph for the play/pause swap.
                 .contentTransition(.symbolEffect(.replace))
@@ -221,5 +317,13 @@ struct LockScreenMusicCardView: View {
     private func format(_ seconds: Double) -> String {
         let total = max(0, Int(seconds.rounded()))
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    // MARK: - Interaction
+
+    private func toggleLift() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+            isArtworkLifted.toggle()
+        }
     }
 }

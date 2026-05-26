@@ -16,14 +16,17 @@ final class LockScreenMusicWidgetController {
     private let idleMonitor = IdleMonitor()
     private var panel: NSPanel?
     /// Small notch-shaped widget at the screen's notch position that
-    /// displays the lock state. Same lifecycle as the music card except
-    /// on unlock — we hold the notch visible for a beat so the
-    /// `lock.fill → lock.open.fill` symbol morph can actually play, then
-    /// fade out (mirrors Atoll's `showUnlockAndScheduleHide`).
+    /// displays the lock state. On unlock we hold visible briefly so
+    /// the `lock.fill → lock.open.fill` symbol morph plays, then
+    /// animate the panel's width down to zero (horizontal shrink from
+    /// the center) before orderOut.
     private var lockNotchPanel: NSPanel?
+    /// Saved full frame so we can restore the panel size for the next
+    /// show after the horizontal-shrink hide.
+    private var lockNotchFullFrame: NSRect = .zero
     private var lockNotchHideTask: Task<Void, Never>?
-    private let lockNotchUnlockHoldDuration: TimeInterval = 1.0
-    private let lockNotchFadeOutDuration: TimeInterval = 0.4
+    private let lockNotchUnlockHoldDuration: TimeInterval = 0.55
+    private let lockNotchShrinkDuration: TimeInterval = 0.49
     private var cancellables = Set<AnyCancellable>()
     private var screenChangeObserver: NSObjectProtocol?
 
@@ -34,7 +37,7 @@ final class LockScreenMusicWidgetController {
 
     /// Panel dimensions, tuned to fit artwork + title/artist + scrubber +
     /// transport buttons with a comfortable margin.
-    private static let panelSize = NSSize(width: 320, height: 460)
+    private static let panelSize = NSSize(width: 480, height: 540)
 
     // MARK: - Lifecycle
 
@@ -76,7 +79,9 @@ final class LockScreenMusicWidgetController {
             panel = registerAndAssign(makePanel())
         }
         if lockNotchPanel == nil {
-            lockNotchPanel = registerAndAssign(makeLockNotchPanel())
+            let lp = registerAndAssign(makeLockNotchPanel())
+            lockNotchPanel = lp
+            lockNotchFullFrame = lp.frame
         }
     }
 
@@ -178,12 +183,16 @@ final class LockScreenMusicWidgetController {
             }
         }
 
-        // Lock notch: show immediately, but on hide schedule a delayed
-        // fade so the unlock symbol morph has time to play.
+        // Lock notch: show immediately at full size; on hide play a
+        // brief hold (so the SF Symbol morph runs) then a horizontal
+        // shrink toward the center.
         if let lockNotchPanel {
             if shouldShow {
                 lockNotchHideTask?.cancel()
                 lockNotchHideTask = nil
+                // Restore full frame in case we caught the panel
+                // mid-shrink from a previous unlock.
+                lockNotchPanel.setFrame(lockNotchFullFrame, display: true)
                 lockNotchPanel.alphaValue = 1
                 if !lockNotchPanel.isVisible {
                     lockNotchPanel.orderFrontRegardless()
@@ -194,30 +203,45 @@ final class LockScreenMusicWidgetController {
         }
     }
 
-    /// Keep the lock notch visible briefly after unlock so the symbol
-    /// morph plays, then fade out and orderOut. Cancelled if the Mac
-    /// re-locks (or goes idle again) during the hold.
+    /// Hold the lock notch visible briefly after unlock so the SF Symbol
+    /// morph plays out, then animate the panel's width to zero from the
+    /// center before orderOut. Cancelled (and the panel restored to its
+    /// full frame) if the Mac re-locks during the hold or shrink.
     private func scheduleLockNotchHide() {
         lockNotchHideTask?.cancel()
         lockNotchHideTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            // Hold visible long enough for the SF Symbol replace
-            // transition to play out.
             try? await Task.sleep(for: .seconds(self.lockNotchUnlockHoldDuration))
-            guard !Task.isCancelled else { return }
-            // If state flipped back to should-show during the hold, bail.
-            if self.locked || self.idle { return }
-            guard let lockNotchPanel = self.lockNotchPanel,
+            guard !Task.isCancelled,
+                  let lockNotchPanel = self.lockNotchPanel,
                   lockNotchPanel.isVisible else { return }
+            if self.locked || self.idle { return }
+
+            // Horizontal shrink toward the center: width → 0, height
+            // and y unchanged, x walks inward so the midpoint stays
+            // put. NSAnimationContext on the animator-proxy frame.
+            let fullFrame = self.lockNotchFullFrame
+            let collapsed = NSRect(
+                x: fullFrame.midX,
+                y: fullFrame.minY,
+                width: 0,
+                height: fullFrame.height
+            )
             NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = self.lockNotchFadeOutDuration
-                lockNotchPanel.animator().alphaValue = 0
+                ctx.duration = self.lockNotchShrinkDuration
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                lockNotchPanel.animator().setFrame(collapsed, display: true)
             }, completionHandler: { [weak self] in
                 guard let self else { return }
-                // Re-check at completion in case state flipped during the fade.
-                if !(self.locked || self.idle), self.lockNotchPanel?.isVisible == true {
-                    self.lockNotchPanel?.orderOut(nil)
-                    self.lockNotchPanel?.alphaValue = 1
+                guard let panel = self.lockNotchPanel else { return }
+                // If state flipped during the shrink, snap back to full
+                // size and stay visible; otherwise hide + restore frame
+                // for the next show.
+                if self.locked || self.idle {
+                    panel.setFrame(self.lockNotchFullFrame, display: true)
+                } else {
+                    panel.orderOut(nil)
+                    panel.setFrame(self.lockNotchFullFrame, display: false)
                 }
             })
         }
@@ -349,4 +373,5 @@ final class LockScreenMusicWidgetController {
         p.contentView = host
         return p
     }
+
 }
