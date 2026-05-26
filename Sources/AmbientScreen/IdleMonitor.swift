@@ -74,23 +74,29 @@ final class IdleMonitor {
         }
     }
 
-    /// True if any active assertion is preventing user-idle sleep or
-    /// declaring the user active. `caffeinate -d` creates
-    /// `PreventUserIdleDisplaySleep`; `-i` creates
-    /// `PreventUserIdleSystemSleep`; `-u` (and many APIs that ping for
-    /// activity) create `UserIsActive`.
+    /// True if something is explicitly preventing the **display** from
+    /// sleeping — `caffeinate -d`, presentation mode, video players,
+    /// "Prevent computer from sleeping" in System Settings. That's
+    /// the signal of "the display is on for a reason, don't overlay
+    /// the lock widget on top of it."
+    ///
+    /// We deliberately do NOT check `UserIsActive` or
+    /// `PreventUserIdleSystemSleep` here, even though earlier
+    /// revisions did. Music apps (Spotify, Apple Music) hold
+    /// `UserIsActive` while a track plays so the system stays awake
+    /// long enough to keep the audio pipeline alive. Gating on that
+    /// would suppress the lock-screen widget every time music is
+    /// playing — which is the exact scenario it's meant to surface
+    /// in. Narrowing the check to `PreventUserIdleDisplaySleep`
+    /// captures "display is being kept lit on purpose" without
+    /// false-positive-suppressing during regular playback.
     static func hasPreventIdleAssertion() -> Bool {
         var raw: Unmanaged<CFDictionary>?
         let result = IOPMCopyAssertionsStatus(&raw)
         guard result == kIOReturnSuccess,
               let dict = raw?.takeRetainedValue() as? [String: Int]
         else { return false }
-        let blockers = [
-            "PreventUserIdleSystemSleep",
-            "PreventUserIdleDisplaySleep",
-            "UserIsActive",
-        ]
-        return blockers.contains { (dict[$0] ?? 0) > 0 }
+        return (dict["PreventUserIdleDisplaySleep"] ?? 0) > 0
     }
 
     /// Seconds since last HID event. Returns 0 if the service is
