@@ -3,7 +3,7 @@ import Foundation
 /// Lyrics document for a single track. `trackKey` is the cache key the
 /// service used to fetch this entry — store it so lookups can short-circuit
 /// repeat fetches of the same playing track. Ported from DynamicNotch.
-struct TrackLyrics: Equatable, Sendable {
+struct TrackLyrics: Equatable, Sendable, Codable {
     let trackKey: String
     let lines: [LyricLine]
     let isSynced: Bool

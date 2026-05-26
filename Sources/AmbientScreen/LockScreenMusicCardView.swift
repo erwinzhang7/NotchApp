@@ -397,8 +397,13 @@ struct LockScreenMusicCardView: View {
     // MARK: - Interaction
 
     private func toggleLift() {
+        let start = Date()
+        NSLog("[Toggle] lock-card.toggleLift START isLifted=%@->%@",
+              cardState.isArtworkLifted ? "Y" : "N",
+              cardState.isArtworkLifted ? "N" : "Y")
         withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
             cardState.isArtworkLifted.toggle()
         }
+        NSLog("[Toggle] lock-card.toggleLift END elapsed=%.3fs", Date().timeIntervalSince(start))
     }
 }

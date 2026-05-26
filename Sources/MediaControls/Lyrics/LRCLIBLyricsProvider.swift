@@ -1,9 +1,20 @@
+import CryptoKit
 import Foundation
 
 /// LRCLIB.net client. Ported from DynamicNotch and adapted to NotchApp's
 /// `LyricsTrackQuery` (DynamicNotch passes a NowPlayingSnapshot struct;
 /// our equivalent is a long-lived ObservableObject so the caller builds
-/// the query). Pure ingestion — no UI dependencies.
+/// the query).
+///
+/// **Performance:** LRCLIB's API is consistently slow: `/api/get` ~5s,
+/// `/api/search` ~10s, measured via curl. We work around that with:
+/// 1. **Race /get and /search in parallel**. Both fire at once. Happy
+///    path returns at /get's pace (~5s); if /get returns 404, the
+///    already-running /search lands a few seconds later instead of
+///    starting fresh after /get gave up.
+/// 2. **Two-layer cache**. In-memory map for the session, plus a JSON
+///    disk cache in `~/Library/Caches/.../lyrics/` so re-plays of a
+///    song across launches are instant.
 @MainActor
 final class LRCLIBLyricsProvider {
     private enum CacheEntry {
@@ -18,6 +29,16 @@ final class LRCLIBLyricsProvider {
                 return nil
             }
         }
+    }
+
+    /// Result of one of the two race tasks. Distinguishes "no result"
+    /// (LRCLIB said this track isn't here) from "errored" (network /
+    /// timeout) so the parent can decide whether to throw or cache as
+    /// missing.
+    private enum RaceOutcome {
+        case lyrics(TrackLyrics)
+        case notFound
+        case error(Error)
     }
 
     private struct Response: Decodable {
@@ -35,34 +56,184 @@ final class LRCLIBLyricsProvider {
 
     private let session: URLSession
     private let decoder = JSONDecoder()
+    private let encoder = JSONEncoder()
     private var cache: [String: CacheEntry] = [:]
+    private let diskCacheDirectory: URL?
 
     init() {
         let configuration = URLSessionConfiguration.default
         configuration.requestCachePolicy = .returnCacheDataElseLoad
-        configuration.timeoutIntervalForRequest = 5
-        configuration.timeoutIntervalForResource = 8
+        // LRCLIB is genuinely slow: /get typically returns in 5-6s,
+        // /search in 8-10s — measured directly with curl. Previous
+        // 5s/8s budget was clipping the response right at the
+        // boundary, which is why lyrics worked for some tracks and
+        // not others (tracks that happened to respond in <5s
+        // succeeded; everything else timed out). Bumped to 15s/20s so
+        // we have ~2-3× headroom above their observed worst case.
+        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForResource = 20
         session = URLSession(configuration: configuration)
+
+        // Disk cache lives under Caches (which macOS may purge under
+        // pressure — fine, lyrics are re-fetchable). One file per
+        // trackKey, named by SHA256 of the key so weird characters
+        // never reach the filesystem layer.
+        let fm = FileManager.default
+        if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let dir = caches
+                .appendingPathComponent("com.erwinzhang.NotchApp", isDirectory: true)
+                .appendingPathComponent("lyrics", isDirectory: true)
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            self.diskCacheDirectory = dir
+        } else {
+            self.diskCacheDirectory = nil
+        }
     }
 
     /// Returns lyrics for `query`, or nil if the track is unknown to
-    /// LRCLIB. Throws on transport errors. Caches both hits and misses
-    /// (so consecutive misses don't re-hit the network).
+    /// LRCLIB. Throws on transport errors when neither endpoint could
+    /// be reached. Caches both hits and misses (memory + disk) so
+    /// consecutive lookups of the same track don't re-hit the network.
     func lyrics(for query: LyricsTrackQuery) async throws -> TrackLyrics? {
         guard let trackKey = query.cacheKey else { return nil }
 
         if let cached = cache[trackKey] {
+            NSLog("[Lyrics] memory cache HIT trackKey=%@", trackKey)
             return cached.lyrics
         }
 
-        if let exactLyrics = try await fetchExactLyrics(for: query, trackKey: trackKey) {
-            cache[trackKey] = .found(exactLyrics)
-            return exactLyrics
+        // Disk cache — survives app restart. ~100ms vs network's ~5s.
+        if let onDisk = loadFromDisk(trackKey: trackKey) {
+            NSLog("[Lyrics] disk cache HIT trackKey=%@", trackKey)
+            cache[trackKey] = .found(onDisk)
+            return onDisk
         }
 
-        let searchedLyrics = try await searchLyrics(for: query, trackKey: trackKey)
-        cache[trackKey] = searchedLyrics.map(CacheEntry.found) ?? .missing
-        return searchedLyrics
+        NSLog("[Lyrics] LRCLIB race start trackKey=%@", trackKey)
+        let raceStart = Date()
+
+        // Race /get and /search in parallel. Both fire at t=0; we
+        // await /get first because it's the faster endpoint when a
+        // track has an exact match (~5s). If /get returns lyrics, we
+        // return immediately and the still-running /search is
+        // implicitly cancelled by async-let scope cleanup. If /get
+        // returns nil (album/duration didn't match LRCLIB's record),
+        // the /search task has already been running in parallel and
+        // is likely close to done — we land at ~10s total instead of
+        // the ~15s that strictly-sequential /get→/search would cost.
+        async let exactOutcome = race(.exact, query: query, trackKey: trackKey)
+        async let searchOutcome = race(.search, query: query, trackKey: trackKey)
+
+        let exact = await exactOutcome
+        if case .lyrics(let lyrics) = exact {
+            NSLog("[Lyrics] /get won race in %.2fs", Date().timeIntervalSince(raceStart))
+            store(trackKey: trackKey, lyrics: lyrics)
+            return lyrics
+        }
+
+        let search = await searchOutcome
+        if case .lyrics(let lyrics) = search {
+            NSLog("[Lyrics] /search won fallback in %.2fs", Date().timeIntervalSince(raceStart))
+            store(trackKey: trackKey, lyrics: lyrics)
+            return lyrics
+        }
+
+        // Both nil. If both errored, throw so the caller knows it
+        // wasn't a "track not in LRCLIB" miss but a transport problem.
+        if case .error(let err) = exact, case .error = search {
+            NSLog("[Lyrics] both endpoints errored in %.2fs", Date().timeIntervalSince(raceStart))
+            throw err
+        }
+
+        NSLog("[Lyrics] LRCLIB no match in %.2fs trackKey=%@",
+              Date().timeIntervalSince(raceStart), trackKey)
+        cache[trackKey] = .missing
+        return nil
+    }
+
+    private enum RaceKind { case exact, search }
+
+    /// Single race task wrapper. Maps the underlying fetch's throw /
+    /// nil into a non-throwing `RaceOutcome` so async-let can collect
+    /// both task results cleanly without forcing the caller into
+    /// try-catch-around-each-async-let gymnastics.
+    private func race(_ kind: RaceKind, query: LyricsTrackQuery, trackKey: String) async -> RaceOutcome {
+        do {
+            let result: TrackLyrics?
+            switch kind {
+            case .exact:
+                result = try await fetchExactLyrics(for: query, trackKey: trackKey)
+            case .search:
+                result = try await searchLyrics(for: query, trackKey: trackKey)
+            }
+            return result.map(RaceOutcome.lyrics) ?? .notFound
+        } catch {
+            return .error(error)
+        }
+    }
+
+    /// Persist lyrics to both caches.
+    private func store(trackKey: String, lyrics: TrackLyrics) {
+        cache[trackKey] = .found(lyrics)
+        saveToDisk(trackKey: trackKey, lyrics: lyrics)
+    }
+
+    /// Disk cache filename: SHA256 of the trackKey, hex-encoded.
+    /// Avoids any cacheKey character ending up in the filesystem.
+    private func diskCacheURL(for trackKey: String) -> URL? {
+        guard let dir = diskCacheDirectory else { return nil }
+        let digest = SHA256.hash(data: Data(trackKey.utf8))
+        let name = digest.compactMap { String(format: "%02x", $0) }.joined()
+        return dir.appendingPathComponent(name).appendingPathExtension("json")
+    }
+
+    private func loadFromDisk(trackKey: String) -> TrackLyrics? {
+        guard let url = diskCacheURL(for: trackKey),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return try? decoder.decode(TrackLyrics.self, from: data)
+    }
+
+    private func saveToDisk(trackKey: String, lyrics: TrackLyrics) {
+        guard let url = diskCacheURL(for: trackKey),
+              let data = try? encoder.encode(lyrics) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    // MARK: - Public cache management
+
+    /// Total bytes the on-disk cache is currently using. Walks the
+    /// cache directory once; cheap for the cache sizes we ship
+    /// (hundreds of entries at most, each a few KB).
+    func diskCacheSizeBytes() -> Int {
+        guard let dir = diskCacheDirectory else { return 0 }
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: dir,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return 0 }
+
+        var total = 0
+        for case let url as URL in enumerator {
+            if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+                total += size
+            }
+        }
+        return total
+    }
+
+    /// Wipe memory + disk caches. Subsequent lookups re-fetch from
+    /// LRCLIB. Used by the settings "Clear" button.
+    func clearCache() {
+        cache.removeAll()
+        guard let dir = diskCacheDirectory else { return }
+        let fm = FileManager.default
+        // Remove + recreate so the directory itself stays around for
+        // future writes without needing to re-check existence each
+        // time. `removeItem` is best-effort — if a file is locked or
+        // permission is unexpectedly denied we skip it.
+        try? fm.removeItem(at: dir)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
     }
 
     private func fetchExactLyrics(for query: LyricsTrackQuery, trackKey: String) async throws -> TrackLyrics? {

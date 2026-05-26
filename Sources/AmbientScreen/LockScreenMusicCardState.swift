@@ -7,7 +7,13 @@ import Foundation
 /// in and out of view.
 @MainActor
 final class LockScreenMusicCardState: ObservableObject {
-    @Published var isArtworkLifted: Bool = false
+    @Published var isArtworkLifted: Bool = false {
+        didSet {
+            NSLog("[Toggle] cardState.isArtworkLifted %@->%@",
+                  oldValue ? "Y" : "N",
+                  isArtworkLifted ? "Y" : "N")
+        }
+    }
 
     /// True while the user is actively typing — keystroke happened
     /// within the last ~3s. Driven by a poll in

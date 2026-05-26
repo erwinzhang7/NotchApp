@@ -53,6 +53,13 @@ struct AmbientSettingsView: View {
     @ObservedObject private var remindersService  = RemindersManager.shared.service
     @ObservedObject private var remindersSettings = RemindersManager.shared.settings
 
+    /// Current lyrics-cache footprint in bytes. Refreshed on view
+    /// appear and after a Clear. Not live-updating during play — the
+    /// directory walk would be wasteful to do on a timer, and the
+    /// number's only interesting when the user opens settings to
+    /// check it.
+    @State private var lyricsCacheBytes: Int = 0
+
     var body: some View {
         Form {
             Section("Dashboard") {
@@ -93,6 +100,24 @@ struct AmbientSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Lyrics") {
+                HStack {
+                    Text("Disk cache")
+                    Spacer()
+                    Text(lyricsCacheDisplay)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Button("Clear") {
+                        MediaControls.shared.lyrics.clearCache()
+                        refreshLyricsCacheSize()
+                    }
+                    .disabled(lyricsCacheBytes == 0)
+                }
+                Text("Lyrics for tracks you've played are stored locally so re-plays are instant. macOS may also evict this automatically when disk space is low.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Calendars") {
                 CalendarSettingsView(
                     service: calendarService,
@@ -108,6 +133,19 @@ struct AmbientSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { refreshLyricsCacheSize() }
+    }
+
+    private var lyricsCacheDisplay: String {
+        if lyricsCacheBytes == 0 { return "Empty" }
+        let f = ByteCountFormatter()
+        f.allowedUnits = [.useKB, .useMB]
+        f.countStyle = .file
+        return f.string(fromByteCount: Int64(lyricsCacheBytes))
+    }
+
+    private func refreshLyricsCacheSize() {
+        lyricsCacheBytes = MediaControls.shared.lyrics.diskCacheSizeBytes()
     }
 }
 

@@ -28,6 +28,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindow = SettingsWindowController()
     private var statusItem: NSStatusItem?
     private var cancellables = Set<AnyCancellable>()
+    /// Global + local NSEvent monitor tokens for the panic-quit
+    /// hotkey (⌃⌥⌘P). Belt-and-suspenders: the LockScreenWidgetPanel
+    /// canBecomeKey=false fix is the real defense against the
+    /// "locked-out at the password field" scenario, but this hotkey
+    /// is an escape hatch for any other state where the app is
+    /// stealing keys or otherwise wedged. macOS does NOT deliver
+    /// keystrokes to third-party apps during the actual lock screen
+    /// (loginwindow has exclusive secure input), so this hotkey only
+    /// works in *normal* operation — not while the system lock is up.
+    private var panicHotkeyGlobal: Any?
+    private var panicHotkeyLocal: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -44,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lockScreenWidget.start()
         idleNotchPill.start()
         startActivitySources()
+        installPanicHotkey()
 
         // Install / remove the status-bar item live in response to the
         // user toggling "Show in Menu Bar" (toggle lives in the notch
@@ -222,5 +234,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
         NSLog("[Lyrics] AppDelegate subscribed to NotchLyricsToggleState")
+    }
+
+    /// Register a system-wide panic hotkey (⌃⌥⌘P) that immediately
+    /// terminates NotchApp. Global monitor catches the keystroke even
+    /// when NotchApp isn't the active app; local monitor handles the
+    /// case where the app IS active (global monitors only fire for
+    /// OTHER apps' windows).
+    ///
+    /// Why ⌃⌥⌘P: four modifiers + a letter is virtually impossible to
+    /// hit accidentally. Easy to remember as "Panic". Use it if the
+    /// notch widget ever wedges (e.g. a private-API panel covering
+    /// something it shouldn't), to kill the app without opening
+    /// settings or any UI surface that might also be wedged.
+    ///
+    /// Note: this is useless while the SYSTEM lock screen is up —
+    /// macOS routes all key input to loginwindow during password
+    /// entry by design. The real defense for the lock-out scenario
+    /// is LockScreenWidgetPanel.canBecomeKey=false.
+    private func installPanicHotkey() {
+        let isPanic: (NSEvent) -> Bool = { event in
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let expected: NSEvent.ModifierFlags = [.control, .option, .command]
+            return mods == expected
+                && event.charactersIgnoringModifiers?.lowercased() == "p"
+        }
+
+        panicHotkeyGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
+            guard isPanic(event) else { return }
+            NSLog("[NotchApp] panic hotkey fired (global) — terminating")
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+
+        panicHotkeyLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if isPanic(event) {
+                NSLog("[NotchApp] panic hotkey fired (local) — terminating")
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+                return nil  // swallow the event
+            }
+            return event
+        }
+
+        NSLog("[NotchApp] panic hotkey installed: ⌃⌥⌘P")
     }
 }

@@ -2,16 +2,16 @@ import Combine
 import Foundation
 
 /// Observes `NowPlayingState`, debounces track-identity changes, and
-/// drives the LRCLIB provider. On-demand: only fetches when at least one
-/// consumer is registered as active (the lock-screen lyrics column or
-/// the notch's tap-to-toggle artwork view). With no consumers, the
-/// service stays quiet — no network calls.
+/// drives the LRCLIB provider. **Always-on prefetch:** every track
+/// change triggers a fetch regardless of whether any UI is currently
+/// showing lyrics. The two-layer cache (memory + disk) means that
+/// when the user later toggles the lyrics view, results are already
+/// there. The cost — one LRCLIB request per played track — is
+/// negligible against the UX win of "lyrics appear instantly when I
+/// ask for them."
 ///
-/// Consumers register themselves with stable string keys via
-/// `setConsumer(_:active:)`. The service refcounts active keys; when the
-/// set transitions empty → non-empty it kicks off a fetch for the
-/// currently-playing track. When it transitions back to empty it
-/// cancels any in-flight task and drops cached state.
+/// `setConsumer(_:active:)` is kept for API stability but no longer
+/// gates fetching. It's effectively a no-op now; callers can ignore.
 @MainActor
 final class LyricsService: ObservableObject {
     @Published private(set) var state: NowPlayingLyricsState = .idle
@@ -22,11 +22,6 @@ final class LyricsService: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var inFlight: Task<Void, Never>?
     private var lastQuery: LyricsTrackQuery?
-    /// Refcount-style consumer set. Each consumer's `setConsumer` call
-    /// adds or removes its key; fetching only happens while the set is
-    /// non-empty. Using a Set lets the same consumer call setConsumer
-    /// repeatedly without breaking the count.
-    private var activeConsumers: Set<String> = []
 
     init(nowPlaying: NowPlayingState, provider: LRCLIBLyricsProvider? = nil) {
         self.nowPlaying = nowPlaying
@@ -77,104 +72,68 @@ final class LyricsService: ObservableObject {
         inFlight?.cancel()
         inFlight = nil
         cancellables.removeAll()
-        activeConsumers.removeAll()
         lastQuery = nil
         state = .idle
         lyrics = nil
     }
 
-    /// Register or unregister a consumer. Stable key per consumer
-    /// (e.g. `"lockScreen"`, `"notch"`); idempotent. When the consumer
-    /// set transitions from empty → non-empty, the service immediately
-    /// kicks off a fetch for whatever's playing now.
-    func setConsumer(_ key: String, active: Bool) {
-        let wasFetchingEnabled = !activeConsumers.isEmpty
+    /// Vestigial. The service now prefetches unconditionally on track
+    /// change, so consumer registration no longer gates anything.
+    /// Kept as a no-op so existing call sites compile without churn;
+    /// safe to remove in a future cleanup.
+    func setConsumer(_ key: String, active: Bool) {}
 
-        if active {
-            activeConsumers.insert(key)
-        } else {
-            activeConsumers.remove(key)
-        }
-
-        let isFetchingEnabled = !activeConsumers.isEmpty
-        NSLog("[Lyrics] setConsumer key=%@ active=%@ consumers=[%@] transition=%@->%@",
-              key,
-              active ? "Y" : "N",
-              activeConsumers.isEmpty ? "" : Array(activeConsumers).joined(separator: ","),
-              wasFetchingEnabled ? "fetching" : "idle",
-              isFetchingEnabled ? "fetching" : "idle")
-
-        switch (wasFetchingEnabled, isFetchingEnabled) {
-        case (false, true):
-            // First consumer arrived — fetch the current track if there is one.
-            kickOffFetchForCurrentTrack()
-
-        case (true, false):
-            // Last consumer left — cancel everything and drop cached
-            // state. Lyrics will be re-fetched on next activation.
-            inFlight?.cancel()
-            inFlight = nil
-            lastQuery = nil
-            state = .idle
-            lyrics = nil
-
-        default:
-            break
-        }
+    /// Surface the provider's disk-cache footprint for the settings
+    /// UI's size indicator.
+    func diskCacheSizeBytes() -> Int {
+        provider.diskCacheSizeBytes()
     }
 
-    /// Called from `start()`'s identity-change pipeline. Records the
-    /// new query so the fetch path knows what to look for, but only
-    /// actually fetches if at least one consumer is active.
+    /// Wipe the cache (memory + disk) AND drop currently-loaded
+    /// lyrics so the view immediately reflects the cleared state.
+    /// A fresh fetch for the playing track kicks off via the existing
+    /// identity-change pipeline only on the next adapter update — so
+    /// post-clear, the current track will re-fetch on its next
+    /// debounced sink fire.
+    func clearCache() {
+        provider.clearCache()
+        inFlight?.cancel()
+        inFlight = nil
+        lastQuery = nil
+        state = .idle
+        lyrics = nil
+    }
+
+    /// Fires on every meaningful track-identity change. Always
+    /// prefetches: cache hits are free, cache misses cost one LRCLIB
+    /// request which lands long before the user is likely to toggle
+    /// lyrics on. Cleared state immediately on identity change so the
+    /// view never shows stale data from the prior track.
     private func handleTrackChange(title: String, artist: String, album: String, duration: TimeInterval) {
         let query = LyricsTrackQuery(title: title, artist: artist, album: album, duration: duration)
-        NSLog("[Lyrics] handleTrackChange title=%@ artist=%@ album=%@ dur=%.1f consumers=%d",
-              title, artist, album, duration, activeConsumers.count)
+        NSLog("[Lyrics] handleTrackChange title=%@ artist=%@ album=%@ dur=%.1f",
+              title, artist, album, duration)
 
-        // No-op if identity hasn't really changed (the adapter
-        // re-emits the same payload on playback-rate updates).
+        // No-op if identity hasn't really changed (cacheKey-based
+        // equality survives sub-second duration drift).
         if let lastQuery, lastQuery == query {
             NSLog("[Lyrics] handleTrackChange: identity unchanged, skipping")
             return
         }
+        let hadPriorLyrics = (lyrics != nil)
         lastQuery = query
 
-        guard !activeConsumers.isEmpty else {
-            // No consumer cares yet — drop stale state but don't fetch.
-            // The fetch will fire whenever a consumer becomes active.
-            NSLog("[Lyrics] handleTrackChange: no active consumers, dropping state without fetch")
-            inFlight?.cancel()
-            inFlight = nil
-            state = .idle
-            lyrics = nil
-            return
+        // Identity actually changed. Drop everything from the prior
+        // track NOW so the view re-evaluates with no lyrics on hand —
+        // the loading-state view kicks in for the brief fetch window.
+        inFlight?.cancel()
+        inFlight = nil
+        if hadPriorLyrics {
+            NSLog("[Lyrics] handleTrackChange: identity changed, clearing prior lyrics")
         }
+        lyrics = nil
+        state = .idle
 
-        fetch(query: query)
-    }
-
-    /// On consumer activation, re-derive the current query from
-    /// NowPlayingState and fetch if there's a real track. Distinct from
-    /// the identity-change path so a consumer joining mid-track gets
-    /// lyrics for what's playing, not whatever was playing on the last
-    /// identity change.
-    private func kickOffFetchForCurrentTrack() {
-        NSLog("[Lyrics] kickOffFetchForCurrentTrack hasMedia=%@ title=%@ artist=%@ dur=%.1f",
-              nowPlaying.hasMedia ? "Y" : "N",
-              nowPlaying.title,
-              nowPlaying.artist,
-              nowPlaying.duration)
-        guard nowPlaying.hasMedia else {
-            NSLog("[Lyrics] kickOff: no media — skipping")
-            return
-        }
-        let query = LyricsTrackQuery(
-            title: nowPlaying.title,
-            artist: nowPlaying.artist,
-            album: nowPlaying.album,
-            duration: nowPlaying.duration
-        )
-        lastQuery = query
         fetch(query: query)
     }
 

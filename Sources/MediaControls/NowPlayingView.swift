@@ -25,8 +25,35 @@ struct NowPlayingView: View {
     /// for that track. Falling back to the controls layout when any
     /// condition isn't met keeps the view useful even when LRCLIB has
     /// nothing for the current song.
-    private var showsLyrics: Bool {
-        lyricsToggle.enabled && state.hasMedia && lyricsService.lyrics != nil
+    /// The lyrics COLUMN shows whenever the user has the toggle on +
+    /// there's a track playing. Inside the column, the view either
+    /// renders the lyrics (if loaded) or a fun loading message (if the
+    /// fetch is in flight). Falling back to the controls layout only
+    /// when neither lyrics nor a loading state are available — i.e.
+    /// the fetch already resolved as notFound / failed.
+    private var showsLyricsColumn: Bool {
+        guard lyricsToggle.enabled, state.hasMedia else { return false }
+        if lyricsService.lyrics != nil { return true }
+        if case .loading = lyricsService.state { return true }
+        return false
+    }
+
+    /// True when we know a fetch is in flight and we should show the
+    /// loading placeholder. Distinct from `showsLyricsColumn` so the
+    /// view's branching reads cleanly.
+    private var isLoadingLyrics: Bool {
+        if case .loading = lyricsService.state, lyricsService.lyrics == nil {
+            return true
+        }
+        return false
+    }
+
+    /// Stable identifier for the loading message picker — the current
+    /// track key, falling back to title+artist if the cacheKey isn't
+    /// derivable yet.
+    private var loadingTrackKey: String {
+        if case .loading(let key) = lyricsService.state { return key }
+        return "\(state.title)|\(state.artist)"
     }
 
     var body: some View {
@@ -54,24 +81,9 @@ struct NowPlayingView: View {
             artworkTapTarget
                 .frame(width: 90, height: 90)
 
-            if showsLyrics, let lyrics = lyricsService.lyrics {
-                LyricsScrollingView(
-                    lyrics: lyrics,
-                    elapsedTimeProvider: lyricsElapsed,
-                    style: .shell,
-                    onLineTap: { line in
-                        guard let target = line.startTime else { return }
-                        // Pin the displayed elapsed at the tap target
-                        // so the lyrics view (and scrubber) move to
-                        // the new line immediately, before the player
-                        // catches up. The adapter then issues the
-                        // actual seek; convergence releases the pin.
-                        state.setSeekPin(target: target, bundleId: state.bundleIdentifier)
-                        state.isScrubbing = false
-                        adapter.seek(toSeconds: target)
-                    }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            if showsLyricsColumn {
+                lyricsColumn
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 controlsColumn
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -80,7 +92,36 @@ struct NowPlayingView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: showsLyrics)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: showsLyricsColumn)
+    }
+
+    /// Either the scrolling lyrics view (loaded) or the fun loading
+    /// placeholder (fetch in flight). Sharing the same outer frame so
+    /// the column doesn't visibly resize when lyrics arrive.
+    @ViewBuilder
+    private var lyricsColumn: some View {
+        if let lyrics = lyricsService.lyrics {
+            LyricsScrollingView(
+                lyrics: lyrics,
+                elapsedTimeProvider: lyricsElapsed,
+                style: .shell,
+                onLineTap: { line in
+                    guard let target = line.startTime else { return }
+                    // Pin the displayed elapsed at the tap target so
+                    // the lyrics view (and scrubber) move to the new
+                    // line immediately, before the player catches up.
+                    state.setSeekPin(target: target, bundleId: state.bundleIdentifier)
+                    state.isScrubbing = false
+                    adapter.seek(toSeconds: target)
+                }
+            )
+        } else if isLoadingLyrics {
+            LyricsLoadingView(trackKey: loadingTrackKey, style: .shell)
+        } else {
+            // Shouldn't render — `showsLyricsColumn` guard means we
+            // either have lyrics or are loading. Defensive empty view.
+            Color.clear
+        }
     }
 
     /// Title / artist / scrubber / transport — the default right

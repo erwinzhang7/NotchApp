@@ -57,7 +57,12 @@ struct LockScreenBackdropView: View {
         // Typing fades the whole backdrop (including our drawn clock)
         // to expose the real macOS lock-screen clock + login UI
         // underneath, so the user can type their password.
-        .opacity(cardState.isArtworkLifted && !cardState.keyboardActive ? 1 : 0)
+        //
+        // Opacity capped at 0.92 (not 1.0) as a defensive measure: if
+        // the keyboard-active detector ever stalls, the loginwindow's
+        // password field stays at least faintly visible through the
+        // backdrop so the user can still aim a click at it.
+        .opacity(cardState.isArtworkLifted && !cardState.keyboardActive ? 0.92 : 0)
         .animation(.easeInOut(duration: 0.45), value: cardState.isArtworkLifted)
         .animation(.easeInOut(duration: 0.25), value: cardState.keyboardActive)
         .animation(.easeInOut(duration: 0.6), value: blurService.blurredArtwork)

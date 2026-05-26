@@ -4,6 +4,14 @@ import Foundation
 /// `NowPlayingState` is a long-lived ObservableObject; the provider just
 /// needs a snapshot of the relevant identification fields plus duration
 /// (used both as a search hint and as part of the cache key).
+///
+/// **Equality** is intentionally cacheKey-based, not field-by-field:
+/// two queries that normalize to the same cacheKey (case/diacritic
+/// differences, sub-second duration drift) compare equal so the
+/// `LyricsService.lastQuery == query` short-circuit treats them as
+/// the same track. Without this, MediaRemote-emitted duration jitter
+/// (214.0 → 214.3 mid-track) was forcing the service to re-fetch even
+/// though both queries map to the same LRCLIB result.
 struct LyricsTrackQuery: Equatable, Sendable {
     let title: String
     let artist: String
@@ -25,6 +33,19 @@ struct LyricsTrackQuery: Equatable, Sendable {
             album.lyricsNormalized,
             "\(Int(duration.rounded()))"
         ].joined(separator: "|")
+    }
+
+    static func == (lhs: LyricsTrackQuery, rhs: LyricsTrackQuery) -> Bool {
+        // Both nil cacheKeys = both "no identifiable track" = treat
+        // as equal so we don't endlessly re-attempt empty queries.
+        switch (lhs.cacheKey, rhs.cacheKey) {
+        case (nil, nil):
+            return true
+        case (let l?, let r?):
+            return l == r
+        default:
+            return false
+        }
     }
 }
 

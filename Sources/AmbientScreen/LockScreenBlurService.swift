@@ -48,7 +48,9 @@ final class LockScreenBlurService: ObservableObject {
     /// = no-op. New bytes = either a cache hit (immediate) or a
     /// background blur task that publishes when complete.
     func update(artworkData: Data?) {
+        let entryStart = Date()
         guard let data = artworkData, data.isEmpty == false else {
+            NSLog("[Toggle] blurService.update artworkData=nil, clearing")
             inFlight?.cancel()
             inFlight = nil
             lastHash = nil
@@ -59,9 +61,11 @@ final class LockScreenBlurService: ObservableObject {
         var hasher = Hasher()
         hasher.combine(data)
         let hash = hasher.finalize()
+        let hashTime = Date().timeIntervalSince(entryStart)
 
         if hash == lastHash {
-            // Already blurred (or currently blurring) these bytes.
+            NSLog("[Toggle] blurService.update bytes=%d hash=%d SAME-HASH (hash took %.3fs) — noop",
+                  data.count, hash, hashTime)
             return
         }
         lastHash = hash
@@ -69,8 +73,13 @@ final class LockScreenBlurService: ObservableObject {
         if let cached = cache[hash] {
             touch(hash)
             blurredArtwork = cached
+            NSLog("[Toggle] blurService.update bytes=%d hash=%d CACHE HIT (hash took %.3fs)",
+                  data.count, hash, hashTime)
             return
         }
+
+        NSLog("[Toggle] blurService.update bytes=%d hash=%d CACHE MISS — spawning background blur (hash took %.3fs)",
+              data.count, hash, hashTime)
 
         inFlight?.cancel()
         inFlight = Task.detached(priority: .userInitiated) { [weak self] in
@@ -86,7 +95,11 @@ final class LockScreenBlurService: ObservableObject {
     /// artwork started blurring while this one was in flight, discard
     /// this result so we don't flicker back to an older image.
     private func applyBlurResult(_ result: NSImage?, hash: Int) {
-        guard lastHash == hash else { return }
+        guard lastHash == hash else {
+            NSLog("[Toggle] blurService background result discarded — hash changed")
+            return
+        }
+        NSLog("[Toggle] blurService background blur DONE hash=%d result=%@", hash, result != nil ? "image" : "nil")
         if let result {
             store(hash: hash, image: result)
         }

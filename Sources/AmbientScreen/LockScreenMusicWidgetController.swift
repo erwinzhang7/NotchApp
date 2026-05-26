@@ -137,6 +137,33 @@ final class LockScreenMusicWidgetController {
             lockNotchPanel = lp
             lockNotchFullFrame = lp.frame
         }
+        logPanelConfiguration()
+    }
+
+    /// One-shot forensic log of each lock-screen panel's configuration.
+    /// If a future lockout happens, the user's Console output will
+    /// definitively show whether our defenses are wired correctly: is
+    /// the music card actually a `LockScreenWidgetPanel`? Is
+    /// canBecomeKey false? Is ignoresMouseEvents set? Etc. Without
+    /// this trace, post-mortem debugging would be guesswork.
+    private func logPanelConfiguration() {
+        func summarize(_ label: String, _ p: NSPanel?) {
+            guard let p else {
+                NSLog("[LockSafety] %@: nil", label)
+                return
+            }
+            NSLog("[LockSafety] %@: class=%@ canBecomeKey=%@ canBecomeMain=%@ ignoresMouseEvents=%@ level=%d alphaValue=%.2f",
+                  label,
+                  String(describing: type(of: p)),
+                  p.canBecomeKey ? "Y" : "N",
+                  p.canBecomeMain ? "Y" : "N",
+                  p.ignoresMouseEvents ? "Y" : "N",
+                  p.level.rawValue,
+                  p.alphaValue)
+        }
+        summarize("musicCard", panel)
+        summarize("backdrop", backdropPanel)
+        summarize("lockNotch", lockNotchPanel)
     }
 
     /// Atoll's pattern: a window only gets a valid `windowNumber` after
@@ -191,9 +218,23 @@ final class LockScreenMusicWidgetController {
     }
 
     private func installObservers() {
-        lockObserver.onLocked = { [weak self] in self?.locked = true; self?.refreshVisibility() }
+        lockObserver.onLocked = { [weak self] in
+            // Safety: force the artwork back to its compact state on
+            // every lock so the full-screen backdrop never starts the
+            // session opaque. Combined with the LockScreenWidgetPanel
+            // canBecomeKey=false guard, this gives the loginwindow's
+            // password field both visibility and key focus the moment
+            // the lock screen appears.
+            self?.cardState.isArtworkLifted = false
+            self?.locked = true
+            self?.refreshVisibility()
+        }
         lockObserver.onUnlocked = { [weak self] in self?.locked = false; self?.refreshVisibility() }
-        lockObserver.onScreensaverStart = { [weak self] in self?.locked = true; self?.refreshVisibility() }
+        lockObserver.onScreensaverStart = { [weak self] in
+            self?.cardState.isArtworkLifted = false
+            self?.locked = true
+            self?.refreshVisibility()
+        }
         lockObserver.onScreensaverStop = { [weak self] in self?.locked = false; self?.refreshVisibility() }
         lockObserver.start()
 
@@ -269,14 +310,23 @@ final class LockScreenMusicWidgetController {
     /// hop pushes the AppKit frame change out of the SwiftUI layout
     /// pass cleanly.
     private func applyLyricsModeResize(showLyrics: Bool, isLifted: Bool) {
+        let start = Date()
         let target = (showLyrics && isLifted) ? Self.lyricsPanelSize : Self.compactPanelSize
-        guard target != currentPanelSize else { return }
+        let changing = target != currentPanelSize
+        NSLog("[Toggle] applyLyricsModeResize showLyrics=%@ isLifted=%@ target=%.0fx%.0f changing=%@",
+              showLyrics ? "Y" : "N",
+              isLifted ? "Y" : "N",
+              target.width, target.height,
+              changing ? "Y" : "N")
+        guard changing else { return }
         currentPanelSize = target
 
         DispatchQueue.main.async { [weak self] in
             guard let self, let panel = self.panel, let screen = NSScreen.main?.frame else { return }
             let origin = self.position(on: screen, size: target)
             let frame = NSRect(origin: origin, size: target)
+            NSLog("[Toggle] applyLyricsModeResize -> animator().setFrame deferred %.3fs after entry",
+                  Date().timeIntervalSince(start))
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0.42
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -289,10 +339,13 @@ final class LockScreenMusicWidgetController {
     /// Drives on-demand fetching: lyrics service only hits LRCLIB while
     /// at least one consumer is active.
     private func applyLyricsConsumerState(showLyrics: Bool) {
+        let start = Date()
+        NSLog("[Toggle] applyLyricsConsumerState showLyrics=%@", showLyrics ? "Y" : "N")
         MediaControls.shared.lyrics.setConsumer(
             Self.lyricsConsumerKey,
             active: showLyrics
         )
+        NSLog("[Toggle] applyLyricsConsumerState DONE elapsed=%.3fs", Date().timeIntervalSince(start))
     }
 
     /// Compute the panel origin. Centered horizontally; vertical position
@@ -319,7 +372,35 @@ final class LockScreenMusicWidgetController {
         // sessionDidResignActive, which precedes lock by a few hundred ms.
         // Treating both as "showing lock presentation" eliminates the
         // blank flash that used to appear right at lock time.
-        let shouldShow = locked || idle || lockObserver.isPreparingLock
+        //
+        // Caffeinate gate: when any IOKit assertion is preventing
+        // idle sleep (caffeinate -d / -i / -u, or anything else
+        // declaring the user active), suppress the widget entirely.
+        // The user explicitly does NOT want the widget overlay
+        // appearing on a display that's still lit because something
+        // is keeping it that way — even if the screen has security-
+        // locked on schedule. IdleMonitor's tick polls assertions
+        // every 5s, so caffeinate engaging mid-lock propagates via
+        // an `onActive` callback within that window.
+        let caffeinated = IdleMonitor.hasPreventIdleAssertion()
+        let isLockState = locked || lockObserver.isPreparingLock
+        let baseShould = isLockState || idle
+        let shouldShow = baseShould && !caffeinated
+        NSLog("[Visibility] locked=%@ idle=%@ preparing=%@ caffeinated=%@ -> show=%@ (lockState=%@)",
+              locked ? "Y" : "N",
+              idle ? "Y" : "N",
+              lockObserver.isPreparingLock ? "Y" : "N",
+              caffeinated ? "Y" : "N",
+              shouldShow ? "Y" : "N",
+              isLockState ? "Y" : "N")
+
+        // Defense-in-depth #5: the music card panel allows mouse
+        // events for scrubber/transport in unlocked state. During
+        // lock (or pre-lock), force mouse-passthrough so the panel
+        // can never visually obscure the password field AND eat
+        // clicks meant for it. The user trades scrubber-on-lock for
+        // guaranteed lock-screen interactivity — worth it.
+        panel?.ignoresMouseEvents = isLockState
 
         // Backdrop rides the same show/hide as the card; opacity of
         // the blurred art + tint inside is gated by isArtworkLifted.
@@ -427,7 +508,7 @@ final class LockScreenMusicWidgetController {
         // SkyLight space pins it there across spaces.
         let screen = NSScreen.main?.frame ?? .zero
         let origin = position(on: screen, size: size)
-        let p = NSPanel(
+        let p = LockScreenWidgetPanel(
             contentRect: NSRect(origin: origin, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -507,7 +588,7 @@ final class LockScreenMusicWidgetController {
             y: screen.maxY - totalSize.height
         )
 
-        let p = NSPanel(
+        let p = LockScreenWidgetPanel(
             contentRect: NSRect(origin: origin, size: totalSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -556,7 +637,7 @@ final class LockScreenMusicWidgetController {
     private func makeBackdropPanel() -> NSPanel {
         let screen = NSScreen.main?.frame ?? .zero
 
-        let p = NSPanel(
+        let p = LockScreenWidgetPanel(
             contentRect: screen,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
@@ -590,5 +671,40 @@ final class LockScreenMusicWidgetController {
         host.autoresizingMask = [.width, .height]
         p.contentView = host
         return p
+    }
+}
+
+/// NSPanel subclass used for every lock-screen-surface panel (music
+/// card, backdrop, lock notch). Layered defenses to ensure we can
+/// never trap the user at the lock screen:
+///
+/// 1. `canBecomeKey = false` + `canBecomeMain = false`. Without this,
+///    our panel could become key during lock → keystrokes routed to
+///    us instead of loginwindow's password field → user can't unlock.
+/// 2. `keyDown` defensively recognizes the ⌃⌥⌘P panic combo even
+///    though (1) should prevent this method from ever being called.
+///    Belt-and-suspenders: if some future SwiftUI subview or AppKit
+///    quirk routes a key event here, the user can still terminate
+///    NotchApp from it.
+///
+/// Mouse-event routing: the music card panel allows mouse events for
+/// scrubber/transport in unlocked state, but the controller flips
+/// `ignoresMouseEvents = true` for the duration of lock so clicks can
+/// pass through to the password field even if our card visually
+/// overlaps it.
+final class LockScreenWidgetPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    override func keyDown(with event: NSEvent) {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let expected: NSEvent.ModifierFlags = [.control, .option, .command]
+        if mods == expected,
+           event.charactersIgnoringModifiers?.lowercased() == "p" {
+            NSLog("[NotchApp] panic hotkey via LockScreenWidgetPanel.keyDown — terminating")
+            NSApp.terminate(nil)
+            return
+        }
+        super.keyDown(with: event)
     }
 }
