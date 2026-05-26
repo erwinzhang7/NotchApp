@@ -11,11 +11,18 @@ struct NowPlayingActivity: NotchActivity {
     var priority: Int { NotchActivityPriority.nowPlaying }
 
     let snapshot: Snapshot
+    /// Equalizer base color extracted from the artwork. Computed by
+    /// the bridge once per track change and passed through so the
+    /// view doesn't have to re-extract on every render.
+    let equalizerColor: NSColor
 
     struct Snapshot: Equatable {
         let title: String
         let artist: String
         let artwork: NSImage?
+        /// Whether playback is currently playing (vs paused) — drives
+        /// the equalizer's start/stop animation toggle.
+        let isPlaying: Bool
     }
 
     /// Camera-side margin (small). Used vertically for top/bottom
@@ -51,6 +58,7 @@ struct NowPlayingActivity: NotchActivity {
     func makeView() -> AnyView {
         AnyView(NowPlayingActivityView(
             snapshot: snapshot,
+            equalizerColor: equalizerColor,
             pillHeight: 32,
             innerMargin: Self.innerMargin,
             outerMargin: Self.outerMargin
@@ -61,6 +69,7 @@ struct NowPlayingActivity: NotchActivity {
 private struct NowPlayingActivityView: View {
     @Environment(\.physicalNotchWidth) private var physicalNotchWidth
     let snapshot: NowPlayingActivity.Snapshot
+    let equalizerColor: NSColor
     let pillHeight: CGFloat
     let innerMargin: CGFloat
     let outerMargin: CGFloat
@@ -91,13 +100,19 @@ private struct NowPlayingActivityView: View {
                 .frame(width: physicalNotchWidth)
                 .allowsHitTesting(false)
 
-            // Trailing wing — equalizer mirrored against the outer-right
-            // edge with the same inner/outer margin split.
-            EqualizerBars()
-                .frame(width: 18, height: 14)
-                .padding(.leading, innerMargin)
-                .padding(.trailing, outerMargin)
-                .frame(width: wingWidth, alignment: .trailing)
+            // Trailing wing — CALayer-backed equalizer (ported from
+            // DynamicNotch). Color is the extracted artwork base tone
+            // so the equalizer takes on the album's vibe.
+            LightweightNowPlayingEqualizerView(
+                isPlaying: snapshot.isPlaying,
+                color: equalizerColor,
+                barHeight: 14,
+                barWidth: 2
+            )
+            .frame(width: 18, height: 14)
+            .padding(.leading, innerMargin)
+            .padding(.trailing, outerMargin)
+            .frame(width: wingWidth, alignment: .trailing)
         }
         .frame(maxHeight: .infinity)
     }
@@ -118,35 +133,5 @@ private struct NowPlayingActivityView: View {
                         .foregroundStyle(.white.opacity(0.7))
                 )
         }
-    }
-}
-
-/// Three-bar equalizer that bounces in place. Pure SwiftUI, no
-/// timer-driven state — uses a `TimelineView` so the animation runs
-/// from the system frame clock without us polling.
-private struct EqualizerBars: View {
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            HStack(alignment: .bottom, spacing: 2) {
-                bar(height: heightForBar(0, t: t))
-                bar(height: heightForBar(1, t: t))
-                bar(height: heightForBar(2, t: t))
-            }
-        }
-    }
-
-    private func bar(height: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-            .fill(Color.white)
-            .frame(width: 3, height: height)
-    }
-
-    /// Per-bar sine wave with a phase offset so the three don't move in
-    /// lockstep. Range 4..14pt.
-    private func heightForBar(_ index: Int, t: TimeInterval) -> CGFloat {
-        let phase = Double(index) * 0.7
-        let value = (sin(t * 4 + phase) + 1) / 2     // 0...1
-        return 4 + CGFloat(value) * 10
     }
 }

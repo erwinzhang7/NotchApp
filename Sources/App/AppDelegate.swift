@@ -212,7 +212,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .stopped:
                     self.idleNotchPill.engine.hideLiveActivity(
                         id: NowPlayingActivity(
-                            snapshot: .init(title: "", artist: "", artwork: nil)
+                            snapshot: .init(title: "", artist: "", artwork: nil, isPlaying: false),
+                            equalizerColor: .gray
                         ).id
                     )
                 }

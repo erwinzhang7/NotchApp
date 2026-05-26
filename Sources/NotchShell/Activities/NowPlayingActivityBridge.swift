@@ -70,9 +70,20 @@ final class NowPlayingActivityBridge: ObservableObject {
         let snapshot = NowPlayingActivity.Snapshot(
             title: nowPlaying.title,
             artist: nowPlaying.artist,
-            artwork: nowPlaying.artwork
+            artwork: nowPlaying.artwork,
+            isPlaying: nowPlaying.isPlaying
         )
-        let activity = NowPlayingActivity(snapshot: snapshot)
+        // Extract equalizer tint from the artwork bytes once per
+        // recompute — CIAreaAverage is GPU-accelerated and takes
+        // a couple of ms. Falls back to a neutral gray if no
+        // artwork is set.
+        let palette = NowPlayingArtworkPaletteExtractor.extract(
+            from: nowPlaying.artworkData
+        )
+        let activity = NowPlayingActivity(
+            snapshot: snapshot,
+            equalizerColor: palette.equalizerBaseColor
+        )
         let trackKey = "\(snapshot.title)|\(snapshot.artist)"
 
         if !wasActive {
