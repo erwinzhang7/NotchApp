@@ -387,9 +387,20 @@ final class MediaRemoteAdapter {
         if let artworkB64 = payload.artworkData {
             let cleaned = artworkB64.trimmingCharacters(in: .whitespacesAndNewlines)
             if let data = Data(base64Encoded: cleaned), let image = NSImage(data: data) {
-                state.artwork = image
+                // Dedup at the source: re-emits of the same bytes are
+                // common (the adapter's own "artwork briefly
+                // disappeared, re-emit" recovery, plus MediaRemote's
+                // own stream redundancy). Skipping the write here
+                // prevents downstream observers — most expensively the
+                // backdrop blur service — from recomputing on data
+                // they've already seen.
+                if state.artworkData != data {
+                    state.artworkData = data
+                    state.artwork = image
+                }
             }
         } else if !isValid {
+            state.artworkData = nil
             state.artwork = nil
         }
         // Otherwise: artwork is missing from this payload but media is still

@@ -22,7 +22,35 @@ final class NowPlayingState: ObservableObject {
     /// the UI doesn't flash blank when an unrelated metadata field changes.
     @Published var artwork: NSImage?
 
-    @Published var isPlaying: Bool = false
+    /// Raw artwork bytes from the most recent payload. Published
+    /// separately from `artwork` so consumers that need stable byte
+    /// equality (the lock-screen backdrop blur cache) can dedup
+    /// without re-encoding the NSImage. The adapter writes both
+    /// atomically when it sees a new image and skips the write when
+    /// bytes are unchanged — that's what suppresses spurious blur
+    /// recomputes on mid-track re-emits.
+    @Published var artworkData: Data?
+
+    @Published var isPlaying: Bool = false {
+        willSet {
+            // Freeze projection on transition true→false. The adapter
+            // only emits a fresh `elapsed` value when it actually
+            // arrives from MediaRemote, which can be hundreds of ms
+            // after the pause flag flips. Between those two events,
+            // `projectedElapsed` would fall back to the stale `elapsed`
+            // field (the last position reported *before* the pause)
+            // and the lyrics view would visibly snap backward. By
+            // computing the projection here — while isPlaying is still
+            // true and `playbackRate` still reflects the playing rate —
+            // and writing it into `elapsed`, the view continues to
+            // show the correct paused position immediately.
+            guard isPlaying, !newValue, lastElapsedUpdate != .distantPast else { return }
+            let drift = Date().timeIntervalSince(lastElapsedUpdate) * playbackRate
+            let projected = elapsed + drift
+            elapsed = duration > 0 ? min(projected, duration) : projected
+            lastElapsedUpdate = Date()
+        }
+    }
     @Published var playbackRate: Double = 1.0
 
     /// Elapsed/duration as last reported by the adapter. `lastElapsedUpdate`

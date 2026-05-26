@@ -1,6 +1,4 @@
 import AppKit
-import CoreImage
-import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 /// Full-screen backdrop that fades in only when the music card's
@@ -8,9 +6,14 @@ import SwiftUI
 /// album art + a soft accent-color radial wash so the foreground
 /// content (lifted art + card) sits on a richer, track-tied surface.
 /// Hidden whenever the card is in its compact state.
+///
+/// **Blur source**: `LockScreenBlurService`, owned by the widget
+/// controller. The service computes blurs on a background queue and
+/// publishes the result; the view never blocks the main thread.
 struct LockScreenBackdropView: View {
     @ObservedObject var musicState: NowPlayingState
     @ObservedObject var cardState: LockScreenMusicCardState
+    @ObservedObject var blurService: LockScreenBlurService
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -18,7 +21,7 @@ struct LockScreenBackdropView: View {
             // screen. Sits below the loginwindow's clock + login UI in
             // z-order (system UI hidden behind us).
             ZStack {
-                if let blurred = blurredArtwork {
+                if let blurred = blurService.blurredArtwork {
                     Image(nsImage: blurred)
                         .resizable()
                         .scaledToFill()
@@ -57,7 +60,17 @@ struct LockScreenBackdropView: View {
         .opacity(cardState.isArtworkLifted && !cardState.keyboardActive ? 1 : 0)
         .animation(.easeInOut(duration: 0.45), value: cardState.isArtworkLifted)
         .animation(.easeInOut(duration: 0.25), value: cardState.keyboardActive)
-        .animation(.easeInOut(duration: 0.6), value: musicState.artwork)
+        .animation(.easeInOut(duration: 0.6), value: blurService.blurredArtwork)
+        // Drive the blur service from the upstream BYTE stream rather
+        // than the decoded NSImage — same album art doesn't re-emit
+        // since the adapter dedups at source, so the service stays
+        // idle on mid-track payload re-emits.
+        .onChange(of: musicState.artworkData) { _, newData in
+            blurService.update(artworkData: newData)
+        }
+        .onAppear {
+            blurService.update(artworkData: musicState.artworkData)
+        }
     }
 
     /// Re-renders every second via TimelineView so the displayed
@@ -116,41 +129,4 @@ struct LockScreenBackdropView: View {
         return f.string(from: date)
     }
 
-    private var blurredArtwork: NSImage? {
-        guard let art = musicState.artwork else { return nil }
-        return Self.cache.image(for: art)
-    }
-
-    private static let cache = LockScreenBlurCache()
-}
-
-/// One-deep blur cache. Artwork is wholesale-replaced on track change
-/// so identity is a stable cache key.
-@MainActor
-final class LockScreenBlurCache {
-    private var lastSource: ObjectIdentifier?
-    private var lastResult: NSImage?
-
-    func image(for source: NSImage) -> NSImage? {
-        let key = ObjectIdentifier(source)
-        if key == lastSource, let lastResult { return lastResult }
-        let blurred = Self.blur(source)
-        lastSource = key
-        lastResult = blurred
-        return blurred
-    }
-
-    nonisolated private static func blur(_ image: NSImage) -> NSImage? {
-        guard let tiff = image.tiffRepresentation,
-              let ci = CIImage(data: tiff) else { return nil }
-
-        let blur = CIFilter.gaussianBlur()
-        blur.inputImage = ci.clampedToExtent()
-        blur.radius = 80
-
-        let ctx = CIContext()
-        guard let output = blur.outputImage,
-              let cg = ctx.createCGImage(output, from: ci.extent) else { return nil }
-        return NSImage(cgImage: cg, size: image.size)
-    }
 }

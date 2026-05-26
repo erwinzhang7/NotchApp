@@ -59,15 +59,14 @@ final class PowerActivitySource: ObservableObject {
     private func installNotifications() {
         // IOPS callback fires from the run loop the source is added to.
         // We add it to the main run loop, so the callback context is
-        // already on the main thread — but we still hop through DispatchQueue.main
-        // to formalize MainActor isolation for Swift concurrency.
+        // already on the main thread — assume the isolation directly
+        // instead of taking an extra DispatchQueue.main.async hop that
+        // would needlessly delay the refresh by a runloop cycle.
         let callback: IOPowerSourceCallbackType = { context in
             guard let context else { return }
             let source = Unmanaged<PowerActivitySource>.fromOpaque(context).takeUnretainedValue()
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    source.refresh()
-                }
+            MainActor.assumeIsolated {
+                source.refresh()
             }
         }
         let context = Unmanaged.passUnretained(self).toOpaque()

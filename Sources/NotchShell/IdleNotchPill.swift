@@ -23,21 +23,14 @@ final class IdleNotchPillController {
     /// the idle pill flush with the notch, no wasted real estate.
     /// Activities extend from here on demand.
     private static let widthExtension: CGFloat = 0
-    /// Maximum extra width an activity can add on top of the base size,
-    /// per side. Drives the (fixed) NSPanel frame width — activities
-    /// animate inside it, the window itself doesn't resize. Bumped to
-    /// 260 to cover the now-playing lyrics activity's 310pt total
-    /// extension (50 artwork + 260 lyrics) with side spacing.
-    private static let maxActivityExtraWidth: CGFloat = 260
-    /// Flush with the physical notch height at rest.
+    /// Maximum extra width an activity can add per side. Drives the
+    /// (fixed) NSPanel frame width — activities animate inside it, the
+    /// window itself doesn't resize. Sized for the widest activity
+    /// (bluetooth at ~170pt leading + 90pt trailing).
+    private static let maxActivityExtraWidth: CGFloat = 200
+    /// Flush with the physical notch height — no activity grows
+    /// vertically (lyrics live in the expanded shell, not the pill).
     private static let heightExtension: CGFloat = 0
-    /// Maximum extra height an activity can add downward past the
-    /// physical notch. Now-playing lyrics-mode grows to 64pt, so
-    /// reserve enough for the SwiftUI shape + a few points of slack.
-    /// Per the design rule "if it goes taller, it must also extend
-    /// past the notch" — lyrics mode also grows wide, so this never
-    /// produces a narrow-tall pill.
-    private static let maxActivityExtraHeight: CGFloat = 60
 
     private let shellState: NotchState
     private let lockObserver: LockScreenObserver
@@ -142,26 +135,18 @@ final class IdleNotchPillController {
         p.hasShadow = false
         p.isMovable = false
         p.hidesOnDeactivate = false
-        // Accept mouse events at the AppKit level so the artwork tap
-        // can fire when an activity is showing. Inside SwiftUI,
-        // non-interactive subviews carry .allowsHitTesting(false) so
-        // they pass clicks through to whatever's underneath — only the
-        // now-playing artwork is hit-testable. NotchWindowController's
-        // hover-to-expand keeps working because that runs off a GLOBAL
-        // mouse-moved monitor, unaffected by panel hit-testing.
-        p.ignoresMouseEvents = false
+        // Display-only — mouse passes through so the existing
+        // NotchWindowController hover detection still drives expand /
+        // collapse from the same area, and so app windows / menu-bar
+        // items under the panel's transparent regions remain
+        // interactive.
+        p.ignoresMouseEvents = true
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         p.level = .statusBar
         p.alphaValue = 1
         p.animationBehavior = .none
 
-        // FirstMouseHostingView overrides acceptsFirstMouse so the
-        // artwork tap fires on the very first click when the panel
-        // isn't key. NSHostingView returns false from acceptsFirstMouse
-        // by default and the first click on a non-activating panel
-        // gets eaten by the activation attempt — exactly the symptom
-        // the user saw: "lyrics toggle in notch isn't working".
-        let host = FirstMouseHostingView(rootView: IdleNotchPillView(
+        let host = NSHostingView(rootView: IdleNotchPillView(
             engine: engine,
             physicalNotchWidth: notchSize.width
         )
@@ -175,20 +160,17 @@ final class IdleNotchPillController {
         self.panel = p
     }
 
-    /// Pill frame in screen coordinates. Width AND height are fixed at
-    /// "widest + tallest possible activity" so the SwiftUI shape inside
-    /// can animate without the NSPanel itself resizing — same trick
-    /// `NotchWindowController` uses for the expanded shell. The pill
-    /// sits at the top of the panel; the space below the pill is
-    /// transparent + non-hit-testable so it doesn't capture stray
-    /// clicks while activities are at their default (flush) height.
+    /// Pill frame in screen coordinates. Width is fixed at "widest
+    /// possible activity" so the SwiftUI shape inside can animate
+    /// without the NSPanel itself resizing — same trick
+    /// `NotchWindowController` uses for the expanded shell.
     private func idleFrame() -> NSRect? {
         guard let placement = NotchGeometry.placement(), placement.hasNotch else {
             return nil
         }
         let notch = placement.collapsedSize
         let width = notch.width + Self.widthExtension * 2 + Self.maxActivityExtraWidth * 2
-        let height = notch.height + Self.heightExtension + Self.maxActivityExtraHeight
+        let height = notch.height + Self.heightExtension
         let x = placement.screen.frame.midX - width / 2
         let y = placement.screen.frame.maxY - height
         return NSRect(x: x, y: y, width: width, height: height)

@@ -18,8 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let powerSource = PowerActivitySource()
     private let bluetoothSource = BluetoothActivitySource()
     private lazy var nowPlayingBridge = NowPlayingActivityBridge(
-        nowPlaying: MediaControls.shared.state,
-        lyrics: MediaControls.shared.lyrics
+        nowPlaying: MediaControls.shared.state
     )
     /// Default temporary-notification duration. Hardcoded because the
     /// settings sheet that would have hosted per-event durations isn't
@@ -201,13 +200,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .stopped:
                     self.idleNotchPill.engine.hideLiveActivity(
                         id: NowPlayingActivity(
-                            snapshot: .init(title: "", artist: "", artwork: nil),
-                            showsLyrics: false
+                            snapshot: .init(title: "", artist: "", artwork: nil)
                         ).id
                     )
                 }
             }
             .store(in: &cancellables)
         nowPlayingBridge.start()
+
+        // Register / unregister the shell as a lyrics consumer based on
+        // the toggle. Centralizing here (instead of in NowPlayingView)
+        // means the consumer state survives across SwiftUI re-renders
+        // and isn't tied to view appearance — lyrics keep loading as
+        // long as the user has the toggle on, even if they switch tabs.
+        NotchLyricsToggleState.shared.$enabled
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { enabled in
+                MediaControls.shared.lyrics.setConsumer("shell", active: enabled)
+            }
+            .store(in: &cancellables)
     }
 }

@@ -30,8 +30,13 @@ final class IdleMonitor {
         // Tick once immediately so the initial state is correct, then poll.
         tick()
         let t = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
-            // Timer callback isn't @MainActor-typed; hop back.
-            DispatchQueue.main.async { self?.tick() }
+            // Timer is added to RunLoop.main below, so the callback
+            // fires on the main thread already — but its closure
+            // isn't typed @MainActor in the Timer API. Assert the
+            // isolation we know we have (instead of the previous
+            // extra DispatchQueue.main.async hop, which delayed each
+            // tick by one runloop cycle for no good reason).
+            MainActor.assumeIsolated { self?.tick() }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t

@@ -3,13 +3,31 @@ import SwiftUI
 /// Now-playing UI mounted in the Ambient tab. Two states: a playing layout
 /// (artwork left, title/artist/transport/scrubber right) and a "nothing
 /// playing" / "media access unavailable" idle layout.
+///
+/// **Lyrics mode** (`NotchLyricsToggleState.shared.enabled`): when on and
+/// synced lyrics are loaded for the current track, the right column
+/// swaps from controls to a scrolling lyrics view with the active line
+/// centered. Toggle the mode by clicking the artwork. The artwork
+/// position + size stays the same in both layouts so the swap reads as
+/// a column flip, not a re-layout.
 struct NowPlayingView: View {
     @ObservedObject var state: NowPlayingState
+    @ObservedObject private var lyricsToggle  = NotchLyricsToggleState.shared
+    @ObservedObject private var lyricsService = MediaControls.shared.lyrics
     let adapter: MediaRemoteAdapter
 
     /// Position the user is currently dragging the scrubber to, in seconds.
     /// Nil when no drag in progress — display falls back to projectedElapsed.
     @State private var dragSeconds: Double?
+
+    /// True only when all three conditions hold: the user toggled lyrics
+    /// on, a track is playing, and the lyrics service has loaded lines
+    /// for that track. Falling back to the controls layout when any
+    /// condition isn't met keeps the view useful even when LRCLIB has
+    /// nothing for the current song.
+    private var showsLyrics: Bool {
+        lyricsToggle.enabled && state.hasMedia && lyricsService.lyrics != nil
+    }
 
     var body: some View {
         Group {
@@ -29,39 +47,87 @@ struct NowPlayingView: View {
         // alignment: .center keeps the right-side stack vertically
         // centered against the album art so the whole block reads as
         // ~one art-height tall instead of spreading to fill all the
-        // section's vertical space. Spacers removed and per-element
-        // .padding(.top, …) values chosen so the stack height lands
-        // close to the 90pt art height (≈ title 16 + artist 16 + bar 36
-        // + transport 26 = ~94pt total).
+        // section's vertical space. In lyrics mode the right column
+        // becomes the scrolling lyrics view at the same vertical
+        // extent.
         HStack(alignment: .center, spacing: 12) {
-            artwork
+            artworkTapTarget
                 .frame(width: 90, height: 90)
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text(state.title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Text(state.artist.isEmpty ? state.album : state.artist)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .padding(.top, 2)
-
-                progressBar
-                    .padding(.top, 6)
-
-                transportRow
-                    .padding(.top, 2)
+            if showsLyrics, let lyrics = lyricsService.lyrics {
+                LyricsScrollingView(
+                    lyrics: lyrics,
+                    elapsedTimeProvider: lyricsElapsed,
+                    style: .shell,
+                    onLineTap: { line in
+                        guard let target = line.startTime else { return }
+                        // Pin the displayed elapsed at the tap target
+                        // so the lyrics view (and scrubber) move to
+                        // the new line immediately, before the player
+                        // catches up. The adapter then issues the
+                        // actual seek; convergence releases the pin.
+                        state.setSeekPin(target: target, bundleId: state.bundleIdentifier)
+                        state.isScrubbing = false
+                        adapter.seek(toSeconds: target)
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else {
+                controlsColumn
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: showsLyrics)
+    }
+
+    /// Title / artist / scrubber / transport — the default right
+    /// column. Hidden when lyrics mode is active.
+    private var controlsColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(state.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Text(state.artist.isEmpty ? state.album : state.artist)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .padding(.top, 2)
+
+            progressBar
+                .padding(.top, 6)
+
+            transportRow
+                .padding(.top, 2)
+        }
+    }
+
+    /// Wraps the artwork with a tap gesture for lyrics toggle. The gesture
+    /// is attached at the 90×90 frame so the click target matches the
+    /// visible artwork rect.
+    private var artworkTapTarget: some View {
+        artwork
+            .frame(width: 90, height: 90)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                lyricsToggle.enabled.toggle()
+            }
+    }
+
+    /// Elapsed-time source for the lyrics view. Honors the seek pin
+    /// (so tap-to-jump moves the active line immediately before the
+    /// player catches up) and otherwise tracks live projection.
+    /// Mirrors the scrubber's `displayedElapsed` but without the local
+    /// drag state — the lyrics view doesn't host a drag of its own.
+    private func lyricsElapsed() -> TimeInterval {
+        if let pin = state.seekPin { return pin.target }
+        return state.projectedElapsed
     }
 
     @ViewBuilder

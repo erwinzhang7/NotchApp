@@ -25,7 +25,11 @@ final class BluetoothActivitySource: ObservableObject {
     }
 
     private var connectionObserver: IOBluetoothUserNotification?
-    private var perDeviceDisconnectObservers: [IOBluetoothUserNotification] = []
+    /// Per-device disconnect observers, keyed by MAC address. Keyed
+    /// (rather than a flat array) so reconnects don't accumulate
+    /// duplicate observers — a flapping AirPods link was previously
+    /// adding a new entry on every reconnect, slowly leaking.
+    private var disconnectObserversByAddress: [String: IOBluetoothUserNotification] = [:]
 
     func start() {
         guard connectionObserver == nil else { return }
@@ -48,8 +52,8 @@ final class BluetoothActivitySource: ObservableObject {
     func stop() {
         connectionObserver?.unregister()
         connectionObserver = nil
-        perDeviceDisconnectObservers.forEach { $0.unregister() }
-        perDeviceDisconnectObservers.removeAll()
+        disconnectObserversByAddress.values.forEach { $0.unregister() }
+        disconnectObserversByAddress.removeAll()
     }
 
     /// IOBluetooth selector — old-school Objective-C bridging. The
@@ -78,17 +82,24 @@ final class BluetoothActivitySource: ObservableObject {
         lastConnected = resolved
         events.send(.connected(resolved))
 
+        // Dedup disconnect observers by device address — a previously
+        // observed device that re-connects should reuse its existing
+        // observer rather than stacking another one. Without this, a
+        // flapping bluetooth link would leak an observer per cycle.
+        let address = device.addressString ?? ""
+        guard disconnectObserversByAddress[address] == nil else { return }
         if let disconnectObserver = device.register(
             forDisconnectNotification: self,
             selector: #selector(handleDisconnect(_:device:))
         ) {
-            perDeviceDisconnectObservers.append(disconnectObserver)
+            disconnectObserversByAddress[address] = disconnectObserver
         }
     }
 
     @objc private func handleDisconnect(_ notification: IOBluetoothUserNotification, device: IOBluetoothDevice) {
         notification.unregister()
-        perDeviceDisconnectObservers.removeAll(where: { $0 === notification })
+        let address = device.addressString ?? ""
+        disconnectObserversByAddress.removeValue(forKey: address)
 
         // Only clear if the disconnecting device is the one we last
         // surfaced — otherwise leave the last-connected state alone.

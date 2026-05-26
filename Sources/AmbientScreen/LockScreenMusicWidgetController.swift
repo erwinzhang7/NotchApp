@@ -20,6 +20,10 @@ final class LockScreenMusicWidgetController {
     /// Shared between the card view and the backdrop view so the
     /// backdrop knows when to fade its blurred-art + tint in.
     private let cardState = LockScreenMusicCardState()
+    /// Background-thread blur service for the backdrop's artwork.
+    /// Owned here so its lifetime tracks the widget controller and
+    /// its cache survives panel hide/show cycles.
+    private let blurService = LockScreenBlurService()
     private var panel: NSPanel?
     /// Full-screen blurred-art + accent-tint backdrop behind the music
     /// card. Only visually relevant while artwork is lifted; opacity
@@ -155,9 +159,11 @@ final class LockScreenMusicWidgetController {
     private func startKeyboardPoll() {
         stopKeyboardPoll()
         let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { self?.tickKeyboardPoll() }
-            }
+            // Timer is added to RunLoop.main so the callback fires on
+            // the main thread; assume the isolation directly instead
+            // of doing the extra DispatchQueue.main.async hop the old
+            // code had.
+            MainActor.assumeIsolated { self?.tickKeyboardPoll() }
         }
         RunLoop.main.add(t, forMode: .common)
         keyboardPollTimer = t
@@ -227,6 +233,7 @@ final class LockScreenMusicWidgetController {
         lockObserver.stop()
         idleMonitor.stop()
         stopKeyboardPoll()
+        blurService.stop()
         panel?.orderOut(nil)
         panel = nil
         lockNotchPanel?.orderOut(nil)
@@ -377,21 +384,36 @@ final class LockScreenMusicWidgetController {
                 width: 0,
                 height: fullFrame.height
             )
+            // Capture the few main-actor values the animation block
+            // needs as locals so the closures don't have to reach
+            // back through `self` (which would trip Swift 6's
+            // Sendable-closure isolation diagnostics — both
+            // `runAnimationGroup`'s `changes` and `completionHandler`
+            // are Sendable closures even though AppKit guarantees they
+            // run on main).
+            let shrinkDuration = self.lockNotchShrinkDuration
+            let fullFrame_ = self.lockNotchFullFrame
+
             NSAnimationContext.runAnimationGroup({ ctx in
-                ctx.duration = self.lockNotchShrinkDuration
+                ctx.duration = shrinkDuration
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 lockNotchPanel.animator().setFrame(collapsed, display: true)
             }, completionHandler: { [weak self] in
-                guard let self else { return }
-                guard let panel = self.lockNotchPanel else { return }
-                // If state flipped during the shrink, snap back to full
-                // size and stay visible; otherwise hide + restore frame
-                // for the next show.
-                if self.locked || self.idle {
-                    panel.setFrame(self.lockNotchFullFrame, display: true)
-                } else {
-                    panel.orderOut(nil)
-                    panel.setFrame(self.lockNotchFullFrame, display: false)
+                // AppKit calls the completion handler on the main
+                // thread, so we can assert main-actor isolation and
+                // touch our main-actor state safely.
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    guard let panel = self.lockNotchPanel else { return }
+                    // If state flipped during the shrink, snap back
+                    // to full size and stay visible; otherwise hide +
+                    // restore frame for the next show.
+                    if self.locked || self.idle {
+                        panel.setFrame(fullFrame_, display: true)
+                    } else {
+                        panel.orderOut(nil)
+                        panel.setFrame(fullFrame_, display: false)
+                    }
                 }
             })
         }
@@ -561,7 +583,8 @@ final class LockScreenMusicWidgetController {
 
         let host = NSHostingView(rootView: LockScreenBackdropView(
             musicState: MediaControls.shared.state,
-            cardState: cardState
+            cardState: cardState,
+            blurService: blurService
         ))
         host.frame = NSRect(origin: .zero, size: screen.size)
         host.autoresizingMask = [.width, .height]

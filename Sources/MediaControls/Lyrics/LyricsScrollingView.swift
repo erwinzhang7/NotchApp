@@ -1,128 +1,226 @@
 import SwiftUI
 
-/// Apple-Music-style synced-lyrics view. Active line is bigger, white,
-/// vertically centered in the container; surrounding lines are dimmed
-/// and scroll past as time advances. Same component, two sizes — tall
-/// for the lock-screen lifted-artwork column, compact for the notch.
+/// Apple-Music-style synced-lyrics view. Inspired by DynamicNotch's
+/// `LockScreenLyricsView`: instead of a ScrollView + scrollTo (which
+/// has a jittery feel because the scroll has to settle each time), the
+/// view shows a fixed window of N lines centered on the active one and
+/// asymmetric move-edge transitions slide new lines in at the bottom
+/// and old lines out at the top. Per-line styling (opacity, scale,
+/// blur) is derived from each line's distance from active so the
+/// surrounding lines visibly recede from the focal one.
 ///
 /// Plain-text (unsynced) lyrics render as a static list with nothing
 /// highlighted — without timestamps there's no "active" line to chase.
 ///
-/// Caller must drive elapsed time via `elapsedTimeProvider` (typically a
-/// closure that reads `NowPlayingState.projectedElapsed`). The view
-/// wraps a `TimelineView` so the active line updates frame-to-frame
-/// without the caller needing to publish.
+/// Tappable: with `onLineTap` provided, each synced line becomes a
+/// tap target that fires the callback with the line. Used by the
+/// expanded shell to jump-seek the player when the user clicks a line.
 struct LyricsScrollingView: View {
     let lyrics: TrackLyrics
     let elapsedTimeProvider: () -> TimeInterval
     let style: Style
+    var onLineTap: ((LyricLine) -> Void)? = nil
 
     enum Style {
         /// Lock-screen right column — fits 5-7 lines.
         case tall
+        /// Expanded shell's now-playing pane — 160pt vertical, ~3-5
+        /// lines visible, fonts sized to read without dwarfing the
+        /// 90pt artwork beside it.
+        case shell
         /// Notch — fits 2-3 lines under the inward shape.
         case compact
+
+        /// How many lines on each side of the active one stay visible.
+        /// Total visible = 2·radius + 1 (active itself + N above + N below).
+        var windowRadius: Int {
+            switch self {
+            case .tall:    return 4
+            case .shell:   return 2
+            case .compact: return 1
+            }
+        }
 
         var activeFontSize: CGFloat {
             switch self {
             case .tall:    return 22
-            case .compact: return 14
+            case .shell:   return 16
+            case .compact: return 13
             }
         }
 
         var inactiveFontSize: CGFloat {
             switch self {
             case .tall:    return 18
-            case .compact: return 12
+            case .shell:   return 13
+            case .compact: return 11
             }
         }
 
         var lineSpacing: CGFloat {
             switch self {
             case .tall:    return 14
-            case .compact: return 6
+            case .shell:   return 6
+            case .compact: return 3
             }
         }
 
         var fadeHeight: CGFloat {
             // Soft fade at top and bottom so off-center lines don't
-            // pop. Bigger fade in tall mode where there's more room.
+            // pop. Sized to the container's vertical room.
             switch self {
             case .tall:    return 60
-            case .compact: return 14
+            case .shell:   return 24
+            case .compact: return 10
             }
         }
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 0.25)) { ctx in
-            let activeIndex = lyrics.activeLineIndex(at: elapsedTimeProvider())
-            content(activeIndex: activeIndex)
+        // 10Hz active-line polling — faster than DynamicNotch's 0.35s
+        // (lock-screen lyrics there feel laggy on dense songs). Cheap;
+        // the recomputation is just an array bisection on elapsedTime.
+        TimelineView(.animation(minimumInterval: 0.1)) { ctx in
+            let elapsed = elapsedTimeProvider()
+            content(elapsed: elapsed)
         }
     }
 
     @ViewBuilder
-    private func content(activeIndex: Int?) -> some View {
+    private func content(elapsed: TimeInterval) -> some View {
         if lyrics.lines.isEmpty {
-            // Defensive — TrackLyrics shouldn't ever land here with an
-            // empty array, but a malformed LRCLIB response could in
-            // theory produce one.
             EmptyView()
+        } else if lyrics.isSynced {
+            let activeIndex = lyrics.activeLineIndex(at: elapsed) ?? 0
+            slidingWindow(activeIndex: activeIndex)
         } else {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(alignment: .leading, spacing: style.lineSpacing) {
-                        ForEach(lyrics.lines) { line in
-                            lineView(line, isActive: line.id == activeIndex)
-                                .id(line.id)
-                        }
-                    }
-                    .padding(.vertical, style.fadeHeight)
-                    .padding(.horizontal, 12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                // Top + bottom fade so lines off-center dissolve rather
-                // than pop against the edge.
-                .mask(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .clear, location: 0),
-                            .init(color: .black, location: style.fadeHeight / 200),
-                            .init(color: .black, location: 1 - style.fadeHeight / 200),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
+            plainStaticList
+        }
+    }
+
+    /// Sliding-window view for synced lyrics. As `activeIndex`
+    /// advances, the `ForEach` set changes (new id at the bottom, old
+    /// id at the top) and asymmetric transitions handle the slide.
+    /// The container's `.animation(value: activeIndex)` ties every
+    /// per-line scale/opacity/blur change to the same spring so the
+    /// whole block moves as a coherent unit.
+    private func slidingWindow(activeIndex: Int) -> some View {
+        let visible = visibleLines(around: activeIndex)
+
+        return VStack(alignment: .leading, spacing: style.lineSpacing) {
+            ForEach(visible) { line in
+                LyricLineView(
+                    line: line,
+                    distanceFromActive: line.id - activeIndex,
+                    style: style,
+                    onTap: onLineTap.map { handler in { handler(line) } }
                 )
-                .onChange(of: activeIndex) { _, newIndex in
-                    guard let newIndex else { return }
-                    withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) {
-                        proxy.scrollTo(newIndex, anchor: .center)
-                    }
-                }
-                .onAppear {
-                    // Land on the current line without animation so a
-                    // mid-song open doesn't scroll from the top.
-                    if let index = activeIndex {
-                        proxy.scrollTo(index, anchor: .center)
-                    }
-                }
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom).combined(with: .opacity),
+                    removal: .move(edge: .top).combined(with: .opacity)
+                ))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(.horizontal, 12)
+        .mask(fadeGradient)
+        // Single spring on the activeIndex value drives every
+        // animatable change at once — slide-in, slide-out, scale,
+        // opacity, blur, font-size. Slightly heavier damping (0.88)
+        // than the scroll-spring was using (0.85) so the lines settle
+        // crisply instead of overshooting visibly.
+        .animation(.spring(response: 0.42, dampingFraction: 0.88), value: activeIndex)
     }
 
-    @ViewBuilder
-    private func lineView(_ line: LyricLine, isActive: Bool) -> some View {
-        Text(line.text)
+    private var plainStaticList: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: style.lineSpacing) {
+                ForEach(lyrics.lines) { line in
+                    Text(line.text)
+                        .font(.system(
+                            size: style.inactiveFontSize,
+                            weight: .medium,
+                            design: .rounded
+                        ))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.vertical, style.fadeHeight)
+            .padding(.horizontal, 12)
+        }
+        .mask(fadeGradient)
+    }
+
+    private var fadeGradient: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: .clear, location: 0),
+                .init(color: .black, location: style.fadeHeight / 200),
+                .init(color: .black, location: 1 - style.fadeHeight / 200),
+                .init(color: .clear, location: 1)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    private func visibleLines(around active: Int) -> [LyricLine] {
+        guard !lyrics.lines.isEmpty else { return [] }
+        let lower = max(0, active - style.windowRadius)
+        let upper = min(lyrics.lines.count - 1, active + style.windowRadius)
+        return Array(lyrics.lines[lower...upper])
+    }
+}
+
+/// Single line. All animatable properties (opacity / scale / blur /
+/// font size) derive from `distanceFromActive` so the parent spring
+/// animates every change to those values together when the active
+/// line shifts.
+private struct LyricLineView: View {
+    let line: LyricLine
+    let distanceFromActive: Int
+    let style: LyricsScrollingView.Style
+    let onTap: (() -> Void)?
+
+    private var isActive: Bool { distanceFromActive == 0 }
+    private var clampedDistance: CGFloat {
+        min(CGFloat(abs(distanceFromActive)), 4)
+    }
+
+    private var opacity: Double {
+        isActive ? 1.0 : max(0.14, 0.45 - Double(clampedDistance) * 0.10)
+    }
+
+    private var scale: CGFloat {
+        max(0.78, 1 - clampedDistance * 0.07)
+    }
+
+    private var blur: CGFloat {
+        isActive ? 0 : clampedDistance * 0.18
+    }
+
+    var body: some View {
+        let label = Text(line.text)
             .font(.system(
                 size: isActive ? style.activeFontSize : style.inactiveFontSize,
                 weight: isActive ? .bold : .medium,
                 design: .rounded
             ))
-            .foregroundStyle(.white.opacity(isActive ? 1.0 : 0.35))
+            .foregroundStyle(.white.opacity(opacity))
+            .lineLimit(2)
             .multilineTextAlignment(.leading)
+            .scaleEffect(scale, anchor: .leading)
+            .blur(radius: blur)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .animation(.easeInOut(duration: 0.25), value: isActive)
+            .contentShape(Rectangle())
+
+        Group {
+            if line.startTime != nil, let onTap {
+                label.onTapGesture(perform: onTap)
+            } else {
+                label
+            }
+        }
     }
 }
