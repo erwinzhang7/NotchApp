@@ -75,6 +75,13 @@ struct LockScreenMusicCardView: View {
     /// as a balanced pair.
     private let lyricsColumnWidth: CGFloat = 320
     private let cardPadding: CGFloat = 16
+    /// Tall enough to fit the big (lifted) layout — 320pt artwork +
+    /// 14pt spacing + the card (title/artist/scrubber/transport,
+    /// ~150pt). Both the small and big columns are bottom-aligned
+    /// inside this fixed-height frame so their **bottoms land at the
+    /// same Y** regardless of state — visual continuity when toggling
+    /// lift on/off.
+    private let leftColumnFrameHeight: CGFloat = 490
 
     private var accent: Color { ArtworkColor.accent(for: state.artwork) }
 
@@ -103,7 +110,15 @@ struct LockScreenMusicCardView: View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
                 leftColumn
-                    .frame(width: leftColumnWidth)
+                    // Bottom-aligned inside the fixed-height frame so
+                    // the column's bottom edge lands at the same Y
+                    // whether we're showing just the small card or
+                    // the full artwork + card stack.
+                    .frame(
+                        width: leftColumnWidth,
+                        height: leftColumnFrameHeight,
+                        alignment: .bottom
+                    )
                     .position(
                         x: leftColumnCenterX(in: geo.size.width),
                         y: geo.size.height / 2
@@ -113,9 +128,12 @@ struct LockScreenMusicCardView: View {
                     let lyricsLeading = geo.size.width * 0.5 + 20
                     let lyricsWidth = max(0, geo.size.width - lyricsLeading - 16)
                     lyricsColumn
+                        // Match the left column's frame height so the
+                        // lyrics scroller occupies the same vertical
+                        // band as the artwork + card.
                         .frame(
                             width: lyricsWidth,
-                            height: geo.size.height,
+                            height: leftColumnFrameHeight,
                             alignment: .leading
                         )
                         .position(

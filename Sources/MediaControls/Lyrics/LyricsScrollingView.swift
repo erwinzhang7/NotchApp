@@ -37,9 +37,12 @@ struct LyricsScrollingView: View {
 
         /// How many lines on each side of the active one stay visible.
         /// Total visible = 2·radius + 1 (active itself + N above + N below).
+        /// Lock-screen (.tall) matches shell on purpose — more lines
+        /// produced visible "ghost text" at the extremes that read as
+        /// a border around the lyrics column.
         var windowRadius: Int {
             switch self {
-            case .tall:    return 4
+            case .tall:    return 2
             case .shell:   return 2
             case .compact: return 1
             }
@@ -187,10 +190,6 @@ private struct LyricLineView: View {
         max(0.78, 1 - clampedDistance * 0.07)
     }
 
-    private var blur: CGFloat {
-        isActive ? 0 : clampedDistance * 0.18
-    }
-
     var body: some View {
         let label = Text(line.text)
             .font(.system(
@@ -202,7 +201,10 @@ private struct LyricLineView: View {
             .lineLimit(2)
             .multilineTextAlignment(.leading)
             .scaleEffect(scale, anchor: .leading)
-            .blur(radius: blur)
+            // No blur on dimmed lines — accumulated blur at the edges
+            // of the visible window produced a ghost-text smudge that
+            // read as a soft border around the column. Opacity +
+            // scale alone give enough perspective falloff.
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
 

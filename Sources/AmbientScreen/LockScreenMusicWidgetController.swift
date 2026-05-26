@@ -322,16 +322,25 @@ final class LockScreenMusicWidgetController {
     }
 
     /// Compute the panel origin. Centered horizontally; vertical position
-    /// is center + the user's offset (slider: left = up, right = down).
-    /// Clamps to keep the panel on-screen on shorter displays.
+    /// is screen-center + a constant downward bias + the user's offset
+    /// (slider: left = up, right = down). Clamps to keep the panel
+    /// on-screen on shorter displays.
+    ///
+    /// The constant `baseDownwardShift` slides the entire panel
+    /// (and therefore everything inside it) lower on screen — used
+    /// instead of an inside-the-panel offset because shifting SwiftUI
+    /// content within the fixed-height panel risks pushing the
+    /// `leftColumnFrameHeight` past the panel's bottom edge and
+    /// clipping the card.
     private func position(on screen: NSRect, size: NSSize) -> NSPoint {
         let topMargin: CGFloat = 20
+        let baseDownwardShift: CGFloat = 70
 
         let x = screen.midX - size.width / 2
 
         // Slider value: > 0 = down visually = lower Y in AppKit.
         let offset = CGFloat(ambient.lockScreenWidgetVerticalOffset)
-        let desiredY = screen.midY - size.height / 2 - offset
+        let desiredY = screen.midY - size.height / 2 - offset - baseDownwardShift
 
         // Keep the panel fully on-screen.
         let maxY = screen.maxY - size.height - topMargin
