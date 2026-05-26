@@ -65,14 +65,6 @@ struct AmbientSettingsView: View {
 
             Section("Lock Screen Music Widget") {
                 Toggle("Show music on lock screen", isOn: $ambient.lockScreenWidgetEnabled)
-                Stepper(
-                    value: $ambient.lockScreenWidgetIdleTimeoutSeconds,
-                    in: 10...3600,
-                    step: 30
-                ) {
-                    Text("Idle timeout: \(ambient.lockScreenWidgetIdleTimeoutSeconds)s")
-                }
-                .disabled(!ambient.lockScreenWidgetEnabled)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Vertical position")
                     HStack(spacing: 8) {
@@ -91,7 +83,7 @@ struct AmbientSettingsView: View {
                     }
                 }
                 .disabled(!ambient.lockScreenWidgetEnabled)
-                Text("Small music card centered horizontally above the lock screen, also shown when the Mac has been idle for the timeout above. Hidden while you're using the Mac. Uses a private macOS API and may break in future macOS updates.")
+                Text("Small music card centered horizontally above the lock screen and shown when the Mac is idle. Hidden while you're using the Mac (or while caffeinate / similar is keeping it awake). Uses a private macOS API and may break in future macOS updates.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
