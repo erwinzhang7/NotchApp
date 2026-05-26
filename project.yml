@@ -54,6 +54,12 @@ targets:
         # these the system silently denies the request rather than prompting.
         INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription: "NotchApp displays your upcoming calendar events in the Ambient tab."
         INFOPLIST_KEY_NSRemindersFullAccessUsageDescription: "NotchApp displays your scheduled reminders in the Ambient tab."
+        # IOBluetooth connect / disconnect notifications. macOS 14+ treats
+        # any IOBluetooth API access as privacy-sensitive even though we
+        # only ask "is something paired and connected" — no scanning, no
+        # data transfer. Without this key, IOBluetoothDevice.register(...)
+        # hard-crashes the process on first call.
+        INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "NotchApp shows a notch activity when Bluetooth devices like AirPods connect."
         INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Erwin Zhang. MIT License."
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         GENERATE_INFOPLIST_FILE: YES

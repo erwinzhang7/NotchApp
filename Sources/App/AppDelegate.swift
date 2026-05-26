@@ -5,6 +5,25 @@ import Combine
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notchController = NotchWindowController()
     private let lockScreenWidget = LockScreenMusicWidgetController()
+    /// Always-visible Dynamic-Island-style pill at the physical notch.
+    /// Hides when the shell expands or the system lock screen owns the
+    /// display. Wired with the shell state + the widget's lock observer
+    /// so all three never visually collide.
+    private lazy var idleNotchPill = IdleNotchPillController(
+        shellState: notchController.state,
+        lockObserver: lockScreenWidget.lockObserver
+    )
+    /// Event sources that feed the idle pill's activity engine.
+    /// Lifecycle parallels the pill itself.
+    private let powerSource = PowerActivitySource()
+    private let bluetoothSource = BluetoothActivitySource()
+    private lazy var nowPlayingBridge = NowPlayingActivityBridge(
+        nowPlaying: MediaControls.shared.state
+    )
+    /// Default temporary-notification duration. Hardcoded because the
+    /// settings sheet that would have hosted per-event durations isn't
+    /// being ported.
+    private static let temporaryActivityDuration: TimeInterval = 3.0
     private lazy var historyWindow = ClipboardHistoryWindowController(store: ClipboardManager.shared.store)
     private lazy var settingsWindow = SettingsWindowController()
     private var statusItem: NSStatusItem?
@@ -23,6 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = RemindersManager.shared
         _ = ConversionManager.shared
         lockScreenWidget.start()
+        idleNotchPill.start()
+        startActivitySources()
 
         // Install / remove the status-bar item live in response to the
         // user toggling "Show in Menu Bar" (toggle lives in the notch
@@ -38,6 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         ClipboardManager.shared.monitor.stop()
         MediaControls.shared.adapter.stop()
+        powerSource.stop()
+        bluetoothSource.stop()
+        nowPlayingBridge.stop()
+        idleNotchPill.stop()
         lockScreenWidget.stop()
         notchController.hide()
     }
@@ -113,5 +138,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func hideMenuBarIcon() {
         AmbientSettings.shared.showInMenuBar = false
+    }
+
+    // MARK: - Activity wiring
+
+    /// Spin up power / bluetooth / now-playing sources and route their
+    /// events into the idle pill's engine. Each branch translates the
+    /// source's domain event into a NotchActivity and the appropriate
+    /// engine call. Subscriptions live for the app's lifetime.
+    private func startActivitySources() {
+        powerSource.events
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                guard let self else { return }
+                switch event {
+                case .plugged:
+                    self.idleNotchPill.engine.showTemporary(
+                        ChargingActivity(
+                            batteryLevel: self.powerSource.batteryLevel,
+                            isCharging: self.powerSource.isCharging
+                        ),
+                        duration: Self.temporaryActivityDuration
+                    )
+                case .lowPower:
+                    self.idleNotchPill.engine.showTemporary(
+                        LowPowerActivity(batteryLevel: self.powerSource.batteryLevel),
+                        duration: Self.temporaryActivityDuration
+                    )
+                case .fullPower:
+                    self.idleNotchPill.engine.showTemporary(
+                        FullPowerActivity(batteryLevel: self.powerSource.batteryLevel),
+                        duration: Self.temporaryActivityDuration
+                    )
+                }
+            }
+            .store(in: &cancellables)
+        powerSource.start()
+
+        bluetoothSource.events
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                guard let self else { return }
+                switch event {
+                case .connected(let device):
+                    self.idleNotchPill.engine.showTemporary(
+                        BluetoothConnectedActivity(device: device),
+                        duration: Self.temporaryActivityDuration
+                    )
+                }
+            }
+            .store(in: &cancellables)
+        bluetoothSource.start()
+
+        nowPlayingBridge.events
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                guard let self else { return }
+                switch event {
+                case .started(let snapshot), .updated(let snapshot):
+                    self.idleNotchPill.engine.showLiveActivity(
+                        NowPlayingActivity(snapshot: snapshot)
+                    )
+                case .stopped:
+                    self.idleNotchPill.engine.hideLiveActivity(
+                        id: NowPlayingActivity(snapshot: .init(title: "", artist: "", artwork: nil)).id
+                    )
+                }
+            }
+            .store(in: &cancellables)
+        nowPlayingBridge.start()
     }
 }

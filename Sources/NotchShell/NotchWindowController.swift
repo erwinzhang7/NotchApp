@@ -30,7 +30,9 @@ import SwiftUI
 /// and the panel frame animates to match.
 @MainActor
 final class NotchWindowController: NSObject {
-    private let state = NotchState()
+    /// Exposed so peripheral panels (e.g. IdleNotchPillController) can
+    /// observe expansion to coordinate their own visibility.
+    let state = NotchState()
     private let ambient = AmbientSettings.shared
     private let layoutModel: NotchLayoutModel
     private var panel: NotchPanel?

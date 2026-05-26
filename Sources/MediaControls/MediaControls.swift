@@ -16,12 +16,18 @@ enum MediaControls {
     final class Services {
         let state: NowPlayingState
         let adapter: MediaRemoteAdapter
+        /// Background lyrics fetcher. Subscribes to `state` on init via
+        /// `start()` and keeps `lyrics.lyrics` / `lyrics.state` current
+        /// for the playing track. No UI yet — ingestion only.
+        let lyrics: LyricsService
 
         init() {
             let state = NowPlayingState()
             self.state = state
             self.adapter = MediaRemoteAdapter(state: state)
+            self.lyrics = LyricsService(nowPlaying: state)
             adapter.start()
+            lyrics.start()
         }
     }
 }

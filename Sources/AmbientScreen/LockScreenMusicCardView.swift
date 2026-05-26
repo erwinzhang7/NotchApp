@@ -43,11 +43,11 @@ private struct VisualEffectBlur: NSViewRepresentable {
 /// accent color extracted from the artwork that tints the scrubber.
 struct LockScreenMusicCardView: View {
     @ObservedObject var state: NowPlayingState
+    /// Shared with the backdrop panel — clicking the artwork flips
+    /// `isArtworkLifted` here, the backdrop watches the same flag.
+    @ObservedObject var cardState: LockScreenMusicCardState
     let adapter: MediaRemoteAdapter
 
-    /// User-driven: clicking the artwork toggles whether it sits inside
-    /// the card (false) or floats above as a bigger blob (true).
-    @State private var isArtworkLifted = false
     /// Drives the slow autoreversing scale that gives a playing track a
     /// subtle "alive" feel.
     @State private var pulse = false
@@ -67,7 +67,7 @@ struct LockScreenMusicCardView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            if isArtworkLifted {
+            if cardState.isArtworkLifted {
                 liftedArtwork
             }
             card
@@ -110,7 +110,7 @@ struct LockScreenMusicCardView: View {
 
     @ViewBuilder
     private var cardContent: some View {
-        if isArtworkLifted {
+        if cardState.isArtworkLifted {
             // Lifted: info column only, no embedded art, centered.
             infoColumn(centered: true)
         } else {
@@ -323,7 +323,7 @@ struct LockScreenMusicCardView: View {
 
     private func toggleLift() {
         withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
-            isArtworkLifted.toggle()
+            cardState.isArtworkLifted.toggle()
         }
     }
 }

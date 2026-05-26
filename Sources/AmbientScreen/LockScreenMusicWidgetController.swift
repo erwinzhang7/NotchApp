@@ -12,9 +12,19 @@ import SwiftUI
 /// controller doesn't load SkyLight or create the panel.
 @MainActor
 final class LockScreenMusicWidgetController {
-    private let lockObserver = LockScreenObserver()
+    /// Exposed so peripheral panels can subscribe to the same lock state
+    /// instead of spinning up their own DistributedNotificationCenter
+    /// observers (cheap, but duplicating event flow is brittle).
+    let lockObserver = LockScreenObserver()
     private let idleMonitor = IdleMonitor()
+    /// Shared between the card view and the backdrop view so the
+    /// backdrop knows when to fade its blurred-art + tint in.
+    private let cardState = LockScreenMusicCardState()
     private var panel: NSPanel?
+    /// Full-screen blurred-art + accent-tint backdrop behind the music
+    /// card. Only visually relevant while artwork is lifted; opacity
+    /// inside SwiftUI gates that.
+    private var backdropPanel: NSPanel?
     /// Small notch-shaped widget at the screen's notch position that
     /// displays the lock state. On unlock we hold visible briefly so
     /// the `lock.fill → lock.open.fill` symbol morph plays, then
@@ -27,6 +37,15 @@ final class LockScreenMusicWidgetController {
     private var lockNotchHideTask: Task<Void, Never>?
     private let lockNotchUnlockHoldDuration: TimeInterval = 0.55
     private let lockNotchShrinkDuration: TimeInterval = 0.49
+
+    /// 0.5s timer polling CGEventSource for recent key activity.
+    /// Started/stopped with the widget. Cheap (one syscall every
+    /// half-second); flips `cardState.keyboardActive` when crossing
+    /// the threshold so the backdrop can fade to expose the real
+    /// lock-screen UI.
+    private var keyboardPollTimer: Timer?
+    /// Seconds since the last key-down that counts as "still typing".
+    private let keyboardActiveWindow: TimeInterval = 3.0
     private var cancellables = Set<AnyCancellable>()
     private var screenChangeObserver: NSObjectProtocol?
 
@@ -75,6 +94,11 @@ final class LockScreenMusicWidgetController {
     }
 
     private func buildIfNeeded() {
+        // Backdrop FIRST so it lands at the bottom of the SkyLight
+        // space's z-order; the card stacks on top.
+        if backdropPanel == nil {
+            backdropPanel = registerAndAssign(makeBackdropPanel())
+        }
         if panel == nil {
             panel = registerAndAssign(makePanel())
         }
@@ -102,6 +126,38 @@ final class LockScreenMusicWidgetController {
         return window
     }
 
+    private func startKeyboardPoll() {
+        stopKeyboardPoll()
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { self?.tickKeyboardPoll() }
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        keyboardPollTimer = t
+    }
+
+    private func stopKeyboardPoll() {
+        keyboardPollTimer?.invalidate()
+        keyboardPollTimer = nil
+    }
+
+    /// Read seconds since the last `.keyDown` from the combined
+    /// session-state event source and flip `cardState.keyboardActive`
+    /// when crossing the active-window threshold. Secure-input mode
+    /// (engaged by the lock-screen password field) masks key *content*
+    /// but not event *timestamps*, so this reading still updates.
+    private func tickKeyboardPoll() {
+        let since = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState,
+            eventType: .keyDown
+        )
+        let active = since < keyboardActiveWindow
+        if cardState.keyboardActive != active {
+            cardState.keyboardActive = active
+        }
+    }
+
     private func installObservers() {
         lockObserver.onLocked = { [weak self] in self?.locked = true; self?.refreshVisibility() }
         lockObserver.onUnlocked = { [weak self] in self?.locked = false; self?.refreshVisibility() }
@@ -109,10 +165,24 @@ final class LockScreenMusicWidgetController {
         lockObserver.onScreensaverStop = { [weak self] in self?.locked = false; self?.refreshVisibility() }
         lockObserver.start()
 
+        // Pre-lock detection: as soon as the workspace resigns active,
+        // bring the lock chrome on screen so it's already up by the
+        // time the system finishes dimming. Without this, the panel
+        // pops in a few hundred ms late and the user catches the
+        // empty frame.
+        lockObserver.$isPreparingLock
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshVisibility() }
+            .store(in: &cancellables)
+
         idleMonitor.threshold = TimeInterval(ambient.lockScreenWidgetIdleTimeoutSeconds)
         idleMonitor.onIdle = { [weak self] in self?.idle = true; self?.refreshVisibility() }
         idleMonitor.onActive = { [weak self] in self?.idle = false; self?.refreshVisibility() }
         idleMonitor.start()
+
+        // Keyboard activity poll so the backdrop knows when to fade
+        // out for the lock-screen password field.
+        startKeyboardPoll()
 
         // Re-center on display config changes (resolution shift, monitor
         // unplugged, etc.) so the widget doesn't end up off-screen.
@@ -130,10 +200,13 @@ final class LockScreenMusicWidgetController {
     private func teardown() {
         lockObserver.stop()
         idleMonitor.stop()
+        stopKeyboardPoll()
         panel?.orderOut(nil)
         panel = nil
         lockNotchPanel?.orderOut(nil)
         lockNotchPanel = nil
+        backdropPanel?.orderOut(nil)
+        backdropPanel = nil
         if let token = screenChangeObserver {
             NotificationCenter.default.removeObserver(token)
             screenChangeObserver = nil
@@ -172,7 +245,21 @@ final class LockScreenMusicWidgetController {
     }
 
     private func refreshVisibility() {
-        let shouldShow = locked || idle
+        // `locked` flips on the DNC lock event; `isPreparingLock` flips on
+        // sessionDidResignActive, which precedes lock by a few hundred ms.
+        // Treating both as "showing lock presentation" eliminates the
+        // blank flash that used to appear right at lock time.
+        let shouldShow = locked || idle || lockObserver.isPreparingLock
+
+        // Backdrop rides the same show/hide as the card; opacity of
+        // the blurred art + tint inside is gated by isArtworkLifted.
+        if let backdropPanel {
+            if shouldShow, !backdropPanel.isVisible {
+                backdropPanel.orderFrontRegardless()
+            } else if !shouldShow, backdropPanel.isVisible {
+                backdropPanel.orderOut(nil)
+            }
+        }
 
         // Music card: simple show / hide.
         if let panel {
@@ -290,6 +377,7 @@ final class LockScreenMusicWidgetController {
 
         let root = LockScreenMusicCardView(
             state: MediaControls.shared.state,
+            cardState: cardState,
             adapter: MediaControls.shared.adapter
         )
         // FirstMouseHostingView lets clicks register on the first hit even
@@ -374,4 +462,45 @@ final class LockScreenMusicWidgetController {
         return p
     }
 
+    /// Full-screen backdrop panel — blurred album art + accent radial
+    /// gradient that fades in only while the music card's artwork is
+    /// in the lifted state. Sits behind the music card and lock notch
+    /// indicator in the same SkyLight space.
+    private func makeBackdropPanel() -> NSPanel {
+        let screen = NSScreen.main?.frame ?? .zero
+
+        let p = NSPanel(
+            contentRect: screen,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        p.isFloatingPanel = true
+        p.titleVisibility = .hidden
+        p.titlebarAppearsTransparent = true
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = false
+        p.isMovable = false
+        p.hidesOnDeactivate = false
+        // Display-only — pass mouse events through to whatever's
+        // underneath (lock screen / desktop).
+        p.ignoresMouseEvents = true
+        p.canBecomeVisibleWithoutLogin = true
+        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // One step below the music card + lock-notch indicator so
+        // they stack on top within the SkyLight space.
+        p.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()) - 1)
+        p.alphaValue = 1
+        p.animationBehavior = .none
+
+        let host = NSHostingView(rootView: LockScreenBackdropView(
+            musicState: MediaControls.shared.state,
+            cardState: cardState
+        ))
+        host.frame = NSRect(origin: .zero, size: screen.size)
+        host.autoresizingMask = [.width, .height]
+        p.contentView = host
+        return p
+    }
 }
