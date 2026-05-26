@@ -89,52 +89,69 @@ struct LockScreenMusicCardView: View {
     }
 
     var body: some View {
-        Group {
-            if showsLyricsColumn {
-                liftedWithLyricsLayout
-            } else if cardState.isArtworkLifted {
-                liftedDefaultLayout
-            } else {
-                compactLayout
+        // Three lock-screen states drive three different positions:
+        //
+        //   small (compact)         → card dead-center on the screen
+        //   big (lifted, no lyrics) → art + card dead-center
+        //   big + lyrics            → art + card centered on the 25%
+        //                              mark; lyrics left-aligned
+        //                              starting at midpoint + 20pt
+        //
+        // GeometryReader provides the panel width (= main display
+        // width since the controller sizes the panel to the full
+        // screen). Columns use absolute positioning via .position().
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                leftColumn
+                    .frame(width: leftColumnWidth)
+                    .position(
+                        x: leftColumnCenterX(in: geo.size.width),
+                        y: geo.size.height / 2
+                    )
+
+                if showsLyricsColumn {
+                    let lyricsLeading = geo.size.width * 0.5 + 20
+                    let lyricsWidth = max(0, geo.size.width - lyricsLeading - 16)
+                    lyricsColumn
+                        .frame(
+                            width: lyricsWidth,
+                            height: geo.size.height,
+                            alignment: .leading
+                        )
+                        .position(
+                            x: lyricsLeading + lyricsWidth / 2,
+                            y: geo.size.height / 2
+                        )
+                }
             }
         }
         .padding(cardPadding)
-        // Anchor to the bottom so the card sits at the same Y in all
-        // states: lifted layouts stack the big artwork above it, compact
-        // leaves the space above empty.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .preferredColorScheme(.dark)
+    }
+
+    /// Horizontal center of the art + card column, in panel-local
+    /// coordinates. Centered on screen when there's no lyrics column;
+    /// shifted to the 25%-from-left mark when lyrics need room on
+    /// the right.
+    private func leftColumnCenterX(in panelWidth: CGFloat) -> CGFloat {
+        showsLyricsColumn ? panelWidth * 0.25 : panelWidth * 0.5
     }
 
     // MARK: - Layouts
 
-    private var compactLayout: some View {
-        card
-            .frame(width: leftColumnWidth)
-    }
-
-    private var liftedDefaultLayout: some View {
-        VStack(spacing: 14) {
-            liftedArtwork
-            card
-        }
-        .frame(width: leftColumnWidth)
-    }
-
-    /// Side-by-side. Left column is the original lifted layout (artwork
-    /// above card, unchanged sizes); right column is the lyrics scroller
-    /// constrained to the same total height so the two columns read as
-    /// equal partners.
-    private var liftedWithLyricsLayout: some View {
-        HStack(alignment: .bottom, spacing: 24) {
+    /// Artwork + card column. In compact mode it's just the card; in
+    /// lifted modes the big artwork sits above the card. Positioned
+    /// at the 25%-from-left mark in `body` regardless of mode.
+    @ViewBuilder
+    private var leftColumn: some View {
+        if cardState.isArtworkLifted {
             VStack(spacing: 14) {
                 liftedArtwork
                 card
             }
-            .frame(width: leftColumnWidth)
-
-            lyricsColumn
-                .frame(width: lyricsColumnWidth)
+        } else {
+            card
         }
     }
 
@@ -144,15 +161,27 @@ struct LockScreenMusicCardView: View {
             LyricsScrollingView(
                 lyrics: lyrics,
                 elapsedTimeProvider: { state.projectedElapsed },
-                style: .tall
+                style: .tall,
+                textColor: lyricsTextColor
             )
-            // Match the combined height of artwork (bigArtworkSize) +
-            // spacing (14) + card so the columns are visually equal.
-            // .frame(maxHeight: .infinity) lets the surrounding
-            // HStack(.bottom) align cleanly; the lyrics fade-masked
-            // ScrollView handles its own internal scrolling.
-            .frame(maxHeight: .infinity)
         }
+    }
+
+    /// White by default. Drops to black only when the artwork's
+    /// dominant tone is extremely bright (HSB brightness > 0.90) —
+    /// the rare case where the backdrop's dark overlay can't drop
+    /// the underlying lit pixels enough for white text to read.
+    /// Sampled from the artwork palette (CIAreaAverage of the
+    /// current artwork bytes).
+    private var lyricsTextColor: Color {
+        guard let data = state.artworkData else { return .white }
+        let palette = NowPlayingArtworkPaletteExtractor.extract(from: data)
+        guard let resolved = palette.equalizerBaseColor.usingColorSpace(.sRGB) else {
+            return .white
+        }
+        var brightness: CGFloat = 0
+        resolved.getHue(nil, saturation: nil, brightness: &brightness, alpha: nil)
+        return brightness > 0.90 ? .black : .white
     }
 
     // MARK: - Lifted artwork (state 2)

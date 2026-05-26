@@ -58,11 +58,13 @@ struct LockScreenBackdropView: View {
         // to expose the real macOS lock-screen clock + login UI
         // underneath, so the user can type their password.
         //
-        // Opacity capped at 0.92 (not 1.0) as a defensive measure: if
-        // the keyboard-active detector ever stalls, the loginwindow's
-        // password field stays at least faintly visible through the
-        // backdrop so the user can still aim a click at it.
-        .opacity(cardState.isArtworkLifted && !cardState.keyboardActive ? 0.92 : 0)
+        // Fully opaque (1.0). The 0.92 safety cap was reverted at the
+        // user's request — full opacity for a cleaner look. Defense
+        // for the lock-screen path now relies on `keyboardActive`
+        // fading the backdrop the moment the user starts typing, plus
+        // `LockScreenWidgetPanel.canBecomeKey = false` ensuring keys
+        // always reach loginwindow regardless of opacity.
+        .opacity(cardState.isArtworkLifted && !cardState.keyboardActive ? 1.0 : 0)
         .animation(.easeInOut(duration: 0.45), value: cardState.isArtworkLifted)
         .animation(.easeInOut(duration: 0.25), value: cardState.keyboardActive)
         .animation(.easeInOut(duration: 0.6), value: blurService.blurredArtwork)

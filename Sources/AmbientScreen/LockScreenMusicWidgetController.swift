@@ -58,22 +58,26 @@ final class LockScreenMusicWidgetController {
 
     private var ambient: AmbientSettings { AmbientSettings.shared }
 
-    /// Panel dimensions — fixed at the widest layout (lifted artwork
-    /// + lyrics column). Surrounding empty space is transparent so
-    /// the compact and lifted-no-lyrics layouts (which only use the
-    /// 320pt left column) look identical regardless of the larger
-    /// panel frame.
+    /// Panel height. Width spans the full main display so SwiftUI
+    /// content can position columns at screen-relative percentages
+    /// (artwork+card centered at 25% from left, lyrics starting at
+    /// midpoint+20pt). Computed lazily — see `currentPanelSize`.
     ///
-    /// **Why static**: an earlier revision flipped the panel between
-    /// 480pt and 720pt via `panel.animator().setFrame(...)` when the
-    /// lyrics column needed to appear. That triggered a SwiftUI +
-    /// NSHostingView constraint-update feedback loop (windowDidLayout
-    /// → invalidateSafeAreaInsets → requestUpdate → windowDidLayout)
-    /// which macOS now throws on as a hard NSGenericException
-    /// instead of just warning. Following the IdleNotchPill pattern
-    /// of "static panel, SwiftUI animates content inside" eliminates
-    /// the issue entirely.
-    private static let panelSize = NSSize(width: 720, height: 540)
+    /// **Why static height + dynamic width**: the previous revision
+    /// flipped the panel between 480pt and 720pt via
+    /// `panel.animator().setFrame(...)` when the lyrics column
+    /// needed to appear, which triggered a SwiftUI + NSHostingView
+    /// constraint-update feedback loop crashing the app with
+    /// NSGenericException. Sizing the panel once at the full screen
+    /// width (and never resizing it) lets SwiftUI animate content
+    /// inside without ever touching `panel.animator()`.
+    private static let panelHeight: CGFloat = 540
+
+    /// Resolved panel size at the moment of panel construction.
+    /// Width = the main display's logical width; height = `panelHeight`.
+    /// Captured into the instance at `makePanel` time so screen
+    /// reconfiguration after launch doesn't silently un-fit the panel.
+    private var currentPanelSize: NSSize = NSSize(width: 1512, height: 540)
     /// Stable consumer key the controller uses to subscribe to the
     /// lyrics service. String constant so registration is idempotent.
     private static let lyricsConsumerKey = "lockScreen"
@@ -292,12 +296,14 @@ final class LockScreenMusicWidgetController {
 
     /// Reposition the panel using the current settings (vertical offset
     /// from center). Called at launch, on screen-config changes, and
-    /// whenever the offset slider moves. Panel size is fixed — only
-    /// the origin moves.
+    /// whenever the offset slider moves. Width tracks the main
+    /// display's logical width so the SwiftUI inside can position
+    /// columns at screen-relative percentages.
     private func recenter() {
         guard let panel, let screen = NSScreen.main?.frame else { return }
+        currentPanelSize = NSSize(width: screen.width, height: Self.panelHeight)
         panel.setFrame(
-            NSRect(origin: position(on: screen, size: Self.panelSize), size: Self.panelSize),
+            NSRect(origin: position(on: screen, size: currentPanelSize), size: currentPanelSize),
             display: true
         )
     }
@@ -471,10 +477,12 @@ final class LockScreenMusicWidgetController {
     // MARK: - Panel
 
     private func makePanel() -> NSPanel {
-        let size = Self.panelSize
-        // Position the widget per current settings (center + user offset).
-        // SkyLight space pins it there across spaces.
-        let screen = NSScreen.main?.frame ?? .zero
+        // Full screen width so SwiftUI can position the artwork
+        // column and lyrics column at absolute screen-relative
+        // positions. Height fixed at `panelHeight`.
+        let screen = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1512, height: 982)
+        let size = NSSize(width: screen.width, height: Self.panelHeight)
+        currentPanelSize = size
         let origin = position(on: screen, size: size)
         let p = LockScreenWidgetPanel(
             contentRect: NSRect(origin: origin, size: size),

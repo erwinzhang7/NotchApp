@@ -20,6 +20,10 @@ struct LyricsScrollingView: View {
     let elapsedTimeProvider: () -> TimeInterval
     let style: Style
     var onLineTap: ((LyricLine) -> Void)? = nil
+    /// Color for the lyric text. Defaults to white — caller can pass
+    /// `.black` when the background is so bright that white reads
+    /// poorly. Active vs inactive opacity is applied on top of this.
+    var textColor: Color = .white
 
     enum Style {
         /// Lock-screen right column — fits 5-7 lines.
@@ -113,6 +117,7 @@ struct LyricsScrollingView: View {
                     line: line,
                     distanceFromActive: line.id - activeIndex,
                     style: style,
+                    textColor: textColor,
                     onTap: onLineTap.map { handler in { handler(line) } }
                 )
                 .transition(.asymmetric(
@@ -122,8 +127,9 @@ struct LyricsScrollingView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        .padding(.horizontal, 12)
-        .mask(fadeGradient)
+        // No padding / no fade mask — the user asked for "just lyrics",
+        // no border or frame around the column. Lines extend to the
+        // outer edges of whatever frame the parent supplies.
         // Single spring on the activeIndex value drives every
         // animatable change at once — slide-in, slide-out, scale,
         // opacity, blur, font-size. Slightly heavier damping (0.88)
@@ -142,27 +148,11 @@ struct LyricsScrollingView: View {
                             weight: .medium,
                             design: .rounded
                         ))
-                        .foregroundStyle(.white.opacity(0.55))
+                        .foregroundStyle(textColor.opacity(0.55))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.vertical, style.fadeHeight)
-            .padding(.horizontal, 12)
         }
-        .mask(fadeGradient)
-    }
-
-    private var fadeGradient: LinearGradient {
-        LinearGradient(
-            stops: [
-                .init(color: .clear, location: 0),
-                .init(color: .black, location: style.fadeHeight / 200),
-                .init(color: .black, location: 1 - style.fadeHeight / 200),
-                .init(color: .clear, location: 1)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
     }
 
     private func visibleLines(around active: Int) -> [LyricLine] {
@@ -181,6 +171,7 @@ private struct LyricLineView: View {
     let line: LyricLine
     let distanceFromActive: Int
     let style: LyricsScrollingView.Style
+    let textColor: Color
     let onTap: (() -> Void)?
 
     private var isActive: Bool { distanceFromActive == 0 }
@@ -207,7 +198,7 @@ private struct LyricLineView: View {
                 weight: isActive ? .bold : .medium,
                 design: .rounded
             ))
-            .foregroundStyle(.white.opacity(opacity))
+            .foregroundStyle(textColor.opacity(opacity))
             .lineLimit(2)
             .multilineTextAlignment(.leading)
             .scaleEffect(scale, anchor: .leading)
