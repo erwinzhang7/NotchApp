@@ -151,11 +151,26 @@ final class LRCLIBLyricsProvider {
             "NotchApp/1.0 (https://github.com/erwinzhang/NotchApp)",
             forHTTPHeaderField: "User-Agent"
         )
+        NSLog("[Lyrics] HTTP -> %@", url.absoluteString)
+        let start = Date()
 
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            NSLog("[Lyrics] HTTP <- ERROR after %.2fs url=%@ err=%@",
+                  Date().timeIntervalSince(start), url.absoluteString, String(describing: error))
+            throw error
+        }
+
+        let dt = Date().timeIntervalSince(start)
         guard let httpResponse = response as? HTTPURLResponse else {
+            NSLog("[Lyrics] HTTP <- non-HTTP response after %.2fs url=%@", dt, url.absoluteString)
             throw URLError(.badServerResponse)
         }
+        NSLog("[Lyrics] HTTP <- %d in %.2fs (%d bytes) url=%@",
+              httpResponse.statusCode, dt, data.count, url.absoluteString)
 
         switch httpResponse.statusCode {
         case 200..<300:

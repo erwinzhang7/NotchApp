@@ -217,8 +217,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { enabled in
+                NSLog("[Lyrics] AppDelegate sees toggle=%@, registering shell consumer", enabled ? "Y" : "N")
                 MediaControls.shared.lyrics.setConsumer("shell", active: enabled)
             }
             .store(in: &cancellables)
+        NSLog("[Lyrics] AppDelegate subscribed to NotchLyricsToggleState")
     }
 }

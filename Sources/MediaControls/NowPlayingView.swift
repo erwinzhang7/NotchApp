@@ -116,6 +116,7 @@ struct NowPlayingView: View {
             .frame(width: 90, height: 90)
             .contentShape(Rectangle())
             .onTapGesture {
+                NSLog("[Lyrics] shell artwork tapped (toggle was %@)", lyricsToggle.enabled ? "Y" : "N")
                 lyricsToggle.enabled.toggle()
             }
     }

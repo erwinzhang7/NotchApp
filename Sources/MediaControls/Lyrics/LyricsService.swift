@@ -41,6 +41,7 @@ final class LyricsService: ObservableObject {
     /// network call.
     func start() {
         guard cancellables.isEmpty else { return }
+        NSLog("[Lyrics] service.start()")
 
         // Identity fields: title / artist / album / duration. Debounced
         // (250ms) so the burst of @Published updates that arrives when
@@ -62,6 +63,7 @@ final class LyricsService: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] hasMedia in
                 guard let self, !hasMedia else { return }
+                NSLog("[Lyrics] hasMedia=false, clearing state")
                 self.inFlight?.cancel()
                 self.inFlight = nil
                 self.lastQuery = nil
@@ -95,6 +97,12 @@ final class LyricsService: ObservableObject {
         }
 
         let isFetchingEnabled = !activeConsumers.isEmpty
+        NSLog("[Lyrics] setConsumer key=%@ active=%@ consumers=[%@] transition=%@->%@",
+              key,
+              active ? "Y" : "N",
+              activeConsumers.isEmpty ? "" : Array(activeConsumers).joined(separator: ","),
+              wasFetchingEnabled ? "fetching" : "idle",
+              isFetchingEnabled ? "fetching" : "idle")
 
         switch (wasFetchingEnabled, isFetchingEnabled) {
         case (false, true):
@@ -120,15 +128,21 @@ final class LyricsService: ObservableObject {
     /// actually fetches if at least one consumer is active.
     private func handleTrackChange(title: String, artist: String, album: String, duration: TimeInterval) {
         let query = LyricsTrackQuery(title: title, artist: artist, album: album, duration: duration)
+        NSLog("[Lyrics] handleTrackChange title=%@ artist=%@ album=%@ dur=%.1f consumers=%d",
+              title, artist, album, duration, activeConsumers.count)
 
         // No-op if identity hasn't really changed (the adapter
         // re-emits the same payload on playback-rate updates).
-        if let lastQuery, lastQuery == query { return }
+        if let lastQuery, lastQuery == query {
+            NSLog("[Lyrics] handleTrackChange: identity unchanged, skipping")
+            return
+        }
         lastQuery = query
 
         guard !activeConsumers.isEmpty else {
             // No consumer cares yet — drop stale state but don't fetch.
             // The fetch will fire whenever a consumer becomes active.
+            NSLog("[Lyrics] handleTrackChange: no active consumers, dropping state without fetch")
             inFlight?.cancel()
             inFlight = nil
             state = .idle
@@ -145,7 +159,15 @@ final class LyricsService: ObservableObject {
     /// lyrics for what's playing, not whatever was playing on the last
     /// identity change.
     private func kickOffFetchForCurrentTrack() {
-        guard nowPlaying.hasMedia else { return }
+        NSLog("[Lyrics] kickOffFetchForCurrentTrack hasMedia=%@ title=%@ artist=%@ dur=%.1f",
+              nowPlaying.hasMedia ? "Y" : "N",
+              nowPlaying.title,
+              nowPlaying.artist,
+              nowPlaying.duration)
+        guard nowPlaying.hasMedia else {
+            NSLog("[Lyrics] kickOff: no media — skipping")
+            return
+        }
         let query = LyricsTrackQuery(
             title: nowPlaying.title,
             artist: nowPlaying.artist,
@@ -158,6 +180,7 @@ final class LyricsService: ObservableObject {
 
     private func fetch(query: LyricsTrackQuery) {
         guard let trackKey = query.cacheKey else {
+            NSLog("[Lyrics] fetch: no cacheKey (empty title/artist), skipping")
             inFlight?.cancel()
             inFlight = nil
             state = .idle
@@ -165,35 +188,52 @@ final class LyricsService: ObservableObject {
             return
         }
 
+        NSLog("[Lyrics] fetch START title=%@ artist=%@ album=%@ dur=%.1f",
+              query.title, query.artist, query.album, query.duration)
+
         inFlight?.cancel()
         state = .loading(trackKey: trackKey)
         let provider = self.provider
+        let fetchStart = Date()
 
         inFlight = Task { [weak self] in
             do {
                 let result = try await provider.lyrics(for: query)
-                guard !Task.isCancelled else { return }
+                let elapsed = Date().timeIntervalSince(fetchStart)
+                guard !Task.isCancelled else {
+                    NSLog("[Lyrics] fetch task cancelled after %.2fs", elapsed)
+                    return
+                }
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     // Ignore late results for a query the user has
                     // already moved past — a slow response landing
                     // after a skip-next would otherwise overwrite the
                     // new track's lyrics.
-                    guard self.lastQuery?.cacheKey == trackKey else { return }
+                    guard self.lastQuery?.cacheKey == trackKey else {
+                        NSLog("[Lyrics] fetch result discarded — track changed (key=%@) after %.2fs", trackKey, elapsed)
+                        return
+                    }
                     if let result {
+                        NSLog("[Lyrics] fetch SUCCESS in %.2fs: %d lines, synced=%@",
+                              elapsed, result.lines.count, result.isSynced ? "Y" : "N")
                         self.lyrics = result
                         self.state = .loaded(result)
                     } else {
+                        NSLog("[Lyrics] fetch NOT FOUND in %.2fs (key=%@)", elapsed, trackKey)
                         self.lyrics = nil
                         self.state = .notFound(trackKey: trackKey)
                     }
                 }
             } catch is CancellationError {
+                NSLog("[Lyrics] fetch CancellationError after %.2fs", Date().timeIntervalSince(fetchStart))
                 return
             } catch {
+                let elapsed = Date().timeIntervalSince(fetchStart)
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
                     guard let self, self.lastQuery?.cacheKey == trackKey else { return }
+                    NSLog("[Lyrics] fetch FAILED in %.2fs: %@", elapsed, String(describing: error))
                     self.lyrics = nil
                     self.state = .failed(trackKey: trackKey)
                 }

@@ -13,7 +13,11 @@ import Foundation
 final class NotchLyricsToggleState: ObservableObject {
     static let shared = NotchLyricsToggleState()
 
-    @Published var enabled: Bool = false
+    @Published var enabled: Bool = false {
+        didSet {
+            NSLog("[Lyrics] toggle %@->%@", oldValue ? "Y" : "N", enabled ? "Y" : "N")
+        }
+    }
 
     private init() {}
 }
