@@ -15,6 +15,9 @@ final class LockScreenMusicWidgetController {
     private let lockObserver = LockScreenObserver()
     private let idleMonitor = IdleMonitor()
     private var panel: NSPanel?
+    /// Small notch-shaped widget at the screen's notch position that
+    /// displays the lock state. Same lifecycle as the music card.
+    private var lockNotchPanel: NSPanel?
     private var cancellables = Set<AnyCancellable>()
     private var screenChangeObserver: NSObjectProtocol?
 
@@ -63,15 +66,29 @@ final class LockScreenMusicWidgetController {
     }
 
     private func buildIfNeeded() {
-        guard panel == nil else { return }
-        let p = makePanel()
-        panel = p
-        // Hand the panel to SkyLight so it sits in the
-        // notification-center-at-screen-lock space. Done once at creation
-        // — the space membership persists for the panel's lifetime.
-        if SkyLightSpace.shared.isAvailable {
-            SkyLightSpace.shared.assign(p)
+        if panel == nil {
+            panel = registerAndAssign(makePanel())
         }
+        if lockNotchPanel == nil {
+            lockNotchPanel = registerAndAssign(makeLockNotchPanel())
+        }
+    }
+
+    /// Atoll's pattern: a window only gets a valid `windowNumber` after
+    /// it's been ordered front at least once. SkyLight delegation needs
+    /// that number. So we show-then-hide once at creation, then assign
+    /// to the SkyLight space. After this any later orderFront just makes
+    /// it visible at the right z-level.
+    private func registerAndAssign(_ window: NSPanel) -> NSPanel {
+        let prevAlpha = window.alphaValue
+        window.alphaValue = 0
+        window.orderFrontRegardless()
+        if SkyLightSpace.shared.isAvailable, window.windowNumber > 0 {
+            SkyLightSpace.shared.assign(window)
+        }
+        window.orderOut(nil)
+        window.alphaValue = prevAlpha == 0 ? 1 : prevAlpha
+        return window
     }
 
     private func installObservers() {
@@ -104,6 +121,8 @@ final class LockScreenMusicWidgetController {
         idleMonitor.stop()
         panel?.orderOut(nil)
         panel = nil
+        lockNotchPanel?.orderOut(nil)
+        lockNotchPanel = nil
         if let token = screenChangeObserver {
             NotificationCenter.default.removeObserver(token)
             screenChangeObserver = nil
@@ -142,12 +161,20 @@ final class LockScreenMusicWidgetController {
     }
 
     private func refreshVisibility() {
-        guard let panel else { return }
         let shouldShow = locked || idle
-        if shouldShow, !panel.isVisible {
-            panel.orderFrontRegardless()
-        } else if !shouldShow, panel.isVisible {
-            panel.orderOut(nil)
+        if let panel {
+            if shouldShow, !panel.isVisible {
+                panel.orderFrontRegardless()
+            } else if !shouldShow, panel.isVisible {
+                panel.orderOut(nil)
+            }
+        }
+        if let lockNotchPanel {
+            if shouldShow, !lockNotchPanel.isVisible {
+                lockNotchPanel.orderFrontRegardless()
+            } else if !shouldShow, lockNotchPanel.isVisible {
+                lockNotchPanel.orderOut(nil)
+            }
         }
     }
 
@@ -188,7 +215,9 @@ final class LockScreenMusicWidgetController {
         //     the window doesn't disappear when other apps go fullscreen
         p.canBecomeVisibleWithoutLogin = true
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
-        p.level = .mainMenu + 1
+        p.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        p.alphaValue = 1
+        p.animationBehavior = .none
 
         let root = LockScreenMusicCardView(
             state: MediaControls.shared.state,
@@ -207,6 +236,70 @@ final class LockScreenMusicWidgetController {
         host.layer?.cornerCurve = .continuous
         host.layer?.cornerRadius = 24
         host.layer?.masksToBounds = true
+        p.contentView = host
+        return p
+    }
+
+    /// Notch-shaped indicator at the top-center of the screen (the
+    /// macOS notch position) that displays the lock state with a
+    /// morphing SF Symbol. Width is wider than the notch itself so the
+    /// indicator zones extend to either side; the center sits exactly
+    /// over the hardware notch.
+    private func makeLockNotchPanel() -> NSPanel {
+        // Reuse NotchGeometry's measurements so the center lines up
+        // exactly with the hardware notch on notched MacBooks (or
+        // falls back to a sensible pill size on non-notched displays).
+        let placement = NotchGeometry.placement()
+        let notchSize = placement?.collapsedSize ?? NotchGeometry.fallbackCollapsedSize
+        let screen = placement?.screen.frame ?? (NSScreen.main?.frame ?? .zero)
+        let indicatorSize = max(0, notchSize.height - 12)
+        let totalSize = CGSize(
+            width: notchSize.width + indicatorSize * 2,
+            height: notchSize.height
+        )
+        let origin = NSPoint(
+            x: screen.midX - totalSize.width / 2,
+            y: screen.maxY - totalSize.height
+        )
+
+        let p = NSPanel(
+            contentRect: NSRect(origin: origin, size: totalSize),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        p.isFloatingPanel = true
+        p.titleVisibility = .hidden
+        p.titlebarAppearsTransparent = true
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.hasShadow = false
+        p.isMovable = false
+        p.hidesOnDeactivate = false
+        // Indicator is display-only — pass mouse events through so
+        // the user can still interact with whatever's underneath
+        // (lock screen / desktop) at the notch position.
+        p.ignoresMouseEvents = true
+        p.canBecomeVisibleWithoutLogin = true
+        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        // CGShieldingWindowLevel is the level macOS uses for security
+        // UI (the login window / lock screen itself). Same level Atoll
+        // uses for their lock-screen widget; combined with the SkyLight
+        // space at NotificationCenterAtScreenLock (rank 400), this
+        // guarantees the indicator renders on top of everything,
+        // including the system lock screen.
+        p.level = NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
+        p.alphaValue = 1
+        p.animationBehavior = .none
+
+        let host = NSHostingView(rootView: LockNotchIndicatorView(
+            lockObserver: lockObserver,
+            notchSize: notchSize
+        ))
+        host.frame = NSRect(origin: .zero, size: totalSize)
+        host.autoresizingMask = [.width, .height]
+        host.wantsLayer = true
+        host.layer?.backgroundColor = NSColor.clear.cgColor
         p.contentView = host
         return p
     }

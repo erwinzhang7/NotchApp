@@ -78,6 +78,11 @@ struct NotchShellView: View {
             // Clip tab's Color.black layers) bleed past the swept top
             // corners and the rounded bottom corners.
             .clipShape(panelShape)
+            // Flatten the shape + content + clip into a single GPU layer
+            // so the spring animates one cached layer rather than
+            // recomputing the panel-shape path and visual-effect blur
+            // every frame. This is the fix for the laggy / low-fps feel.
+            .compositingGroup()
             // Border on left / right / bottom only. The top edge would look like a seam
             // against the screen top, so we mask the top 1.5pt of the stroke out — the
             // tiny gap at the very top of the L/R edges falls behind the physical notch
@@ -105,10 +110,19 @@ struct NotchShellView: View {
         // menu. With the menu-bar icon hidden, this is the user's path
         // back to Settings and to re-showing the icon.
         .contextMenu { notchContextMenu }
-        // Same easing as NotchWindowController's window-frame animation so the
-        // SwiftUI content edge and the NSPanel edge advance together — no
-        // gap above or below the panel mid-animation.
-        .animation(.easeOut(duration: 0.32), value: isExpanded)
+        // Asymmetric spring. The NSPanel window does NOT resize — it
+        // stays pinned at expandedPanelFrame and only its
+        // ignoresMouseEvents flag toggles. That lets this spring drive
+        // the visible animation purely, with no fighting CAMediaTiming
+        // function, which is the silky feel we want. Open: snappy
+        // overshoot. Close: critically damped (overshoot on tuck-away
+        // looks janky once the user has moved on).
+        .animation(
+            isExpanded
+                ? .spring(response: 0.38, dampingFraction: 0.78, blendDuration: 0)
+                : .spring(response: 0.36, dampingFraction: 1.0, blendDuration: 0),
+            value: isExpanded
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // The panel window's top edge sits flush with the screen top. Without
         // this, SwiftUI's automatic top safe-area inset (notch height) pushes

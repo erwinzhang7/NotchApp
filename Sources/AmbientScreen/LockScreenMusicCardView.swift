@@ -212,6 +212,8 @@ struct LockScreenMusicCardView: View {
                 .foregroundStyle(.white)
                 .frame(width: size + 18, height: size + 12)
                 .contentShape(Rectangle())
+                // Smooth icon morph for the play/pause swap.
+                .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.plain)
     }
