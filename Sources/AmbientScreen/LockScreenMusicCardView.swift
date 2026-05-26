@@ -39,6 +39,11 @@ private struct VisualEffectBlur: NSViewRepresentable {
 ///   square; the card reflows to info-only. matchedGeometryEffect
 ///   transitions the artwork between the two positions smoothly.
 ///
+/// **Lyrics (lifted state only)**: when the setting is on and synced
+/// lyrics are loaded for the current track, a scrolling lyrics column
+/// appears to the right of the artwork+card column. Layout switches to
+/// HStack; the original column keeps its sizes and positions unchanged.
+///
 /// Plus: gentle "breathing" pulse on the artwork while playing, and an
 /// accent color extracted from the artwork that tints the scrubber.
 struct LockScreenMusicCardView: View {
@@ -46,6 +51,8 @@ struct LockScreenMusicCardView: View {
     /// Shared with the backdrop panel — clicking the artwork flips
     /// `isArtworkLifted` here, the backdrop watches the same flag.
     @ObservedObject var cardState: LockScreenMusicCardState
+    @ObservedObject var lyricsService: LyricsService
+    @ObservedObject var ambient: AmbientSettings
     let adapter: MediaRemoteAdapter
 
     /// Drives the slow autoreversing scale that gives a playing track a
@@ -60,24 +67,92 @@ struct LockScreenMusicCardView: View {
 
     private let smallArtworkSize: CGFloat = 64
     private let bigArtworkSize: CGFloat = 320
-    /// Outer/inner padding the card uses around its content.
+    /// Width of the left column (artwork + card) when lyrics column is
+    /// showing — pinned so the artwork keeps its 320pt footprint and
+    /// the card matches.
+    private let leftColumnWidth: CGFloat = 320
+    /// Width of the lyrics column. Same as the artwork so the two read
+    /// as a balanced pair.
+    private let lyricsColumnWidth: CGFloat = 320
     private let cardPadding: CGFloat = 16
 
     private var accent: Color { ArtworkColor.accent(for: state.artwork) }
 
+    /// Lyrics column is shown when the setting is on, the artwork is
+    /// lifted, and we actually have lyrics loaded. Empty `notFound` /
+    /// loading / failed states collapse back to the current no-lyrics
+    /// layout per the design — no placeholder column.
+    private var showsLyricsColumn: Bool {
+        ambient.showLockScreenLyrics &&
+        cardState.isArtworkLifted &&
+        lyricsService.lyrics != nil
+    }
+
     var body: some View {
-        VStack(spacing: 14) {
-            if cardState.isArtworkLifted {
-                liftedArtwork
+        Group {
+            if showsLyricsColumn {
+                liftedWithLyricsLayout
+            } else if cardState.isArtworkLifted {
+                liftedDefaultLayout
+            } else {
+                compactLayout
             }
-            card
         }
         .padding(cardPadding)
-        // Anchor to the bottom so the card sits at the same Y in both
-        // states: lifted state stacks the big artwork above it, compact
-        // state leaves the space above the card empty.
+        // Anchor to the bottom so the card sits at the same Y in all
+        // states: lifted layouts stack the big artwork above it, compact
+        // leaves the space above empty.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Layouts
+
+    private var compactLayout: some View {
+        card
+            .frame(width: leftColumnWidth)
+    }
+
+    private var liftedDefaultLayout: some View {
+        VStack(spacing: 14) {
+            liftedArtwork
+            card
+        }
+        .frame(width: leftColumnWidth)
+    }
+
+    /// Side-by-side. Left column is the original lifted layout (artwork
+    /// above card, unchanged sizes); right column is the lyrics scroller
+    /// constrained to the same total height so the two columns read as
+    /// equal partners.
+    private var liftedWithLyricsLayout: some View {
+        HStack(alignment: .bottom, spacing: 24) {
+            VStack(spacing: 14) {
+                liftedArtwork
+                card
+            }
+            .frame(width: leftColumnWidth)
+
+            lyricsColumn
+                .frame(width: lyricsColumnWidth)
+        }
+    }
+
+    @ViewBuilder
+    private var lyricsColumn: some View {
+        if let lyrics = lyricsService.lyrics {
+            LyricsScrollingView(
+                lyrics: lyrics,
+                elapsedTimeProvider: { state.projectedElapsed },
+                style: .tall
+            )
+            // Match the combined height of artwork (bigArtworkSize) +
+            // spacing (14) + card so the columns are visually equal.
+            // .frame(maxHeight: .infinity) lets the surrounding
+            // HStack(.bottom) align cleanly; the lyrics fade-masked
+            // ScrollView handles its own internal scrolling.
+            .frame(maxHeight: .infinity)
+        }
     }
 
     // MARK: - Lifted artwork (state 2)

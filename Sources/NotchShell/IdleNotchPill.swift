@@ -23,14 +23,21 @@ final class IdleNotchPillController {
     /// the idle pill flush with the notch, no wasted real estate.
     /// Activities extend from here on demand.
     private static let widthExtension: CGFloat = 0
-    /// Maximum extra width an activity can add on top of the base size.
-    /// Drives the (fixed) NSPanel frame width — activities animate
-    /// inside it, the window itself doesn't resize.
-    private static let maxActivityExtraWidth: CGFloat = 220
-    /// Flush with the physical notch height — matches the lock indicator.
-    /// Activity content stays inside this footprint by design (user wants
-    /// flush, no downward bulge).
+    /// Maximum extra width an activity can add on top of the base size,
+    /// per side. Drives the (fixed) NSPanel frame width — activities
+    /// animate inside it, the window itself doesn't resize. Bumped to
+    /// 260 to cover the now-playing lyrics activity's 310pt total
+    /// extension (50 artwork + 260 lyrics) with side spacing.
+    private static let maxActivityExtraWidth: CGFloat = 260
+    /// Flush with the physical notch height at rest.
     private static let heightExtension: CGFloat = 0
+    /// Maximum extra height an activity can add downward past the
+    /// physical notch. Now-playing lyrics-mode grows to 64pt, so
+    /// reserve enough for the SwiftUI shape + a few points of slack.
+    /// Per the design rule "if it goes taller, it must also extend
+    /// past the notch" — lyrics mode also grows wide, so this never
+    /// produces a narrow-tall pill.
+    private static let maxActivityExtraHeight: CGFloat = 60
 
     private let shellState: NotchState
     private let lockObserver: LockScreenObserver
@@ -107,6 +114,14 @@ final class IdleNotchPillController {
         guard panel == nil, let frame = idleFrame(), let notchSize = currentNotchSize() else { return }
         physicalNotchSize = notchSize
 
+        // One-shot console line so we always know what the system is
+        // actually reporting for the camera area on this Mac. Width
+        // comes from `screen.frame.width - auxiliaryTopLeftArea.width
+        // - auxiliaryTopRightArea.width`; height from
+        // `screen.safeAreaInsets.top`.
+        NSLog("[IdleNotchPill] measured notch: width=%.1fpt height=%.1fpt",
+              notchSize.width, notchSize.height)
+
         let baseSize = CGSize(
             width: notchSize.width + Self.widthExtension * 2,
             height: notchSize.height + Self.heightExtension
@@ -127,15 +142,26 @@ final class IdleNotchPillController {
         p.hasShadow = false
         p.isMovable = false
         p.hidesOnDeactivate = false
-        // Display-only — mouse passes through so the existing
-        // NotchWindowController hover detection still drives expand/collapse.
-        p.ignoresMouseEvents = true
+        // Accept mouse events at the AppKit level so the artwork tap
+        // can fire when an activity is showing. Inside SwiftUI,
+        // non-interactive subviews carry .allowsHitTesting(false) so
+        // they pass clicks through to whatever's underneath — only the
+        // now-playing artwork is hit-testable. NotchWindowController's
+        // hover-to-expand keeps working because that runs off a GLOBAL
+        // mouse-moved monitor, unaffected by panel hit-testing.
+        p.ignoresMouseEvents = false
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         p.level = .statusBar
         p.alphaValue = 1
         p.animationBehavior = .none
 
-        let host = NSHostingView(rootView: IdleNotchPillView(
+        // FirstMouseHostingView overrides acceptsFirstMouse so the
+        // artwork tap fires on the very first click when the panel
+        // isn't key. NSHostingView returns false from acceptsFirstMouse
+        // by default and the first click on a non-activating panel
+        // gets eaten by the activation attempt — exactly the symptom
+        // the user saw: "lyrics toggle in notch isn't working".
+        let host = FirstMouseHostingView(rootView: IdleNotchPillView(
             engine: engine,
             physicalNotchWidth: notchSize.width
         )
@@ -149,17 +175,20 @@ final class IdleNotchPillController {
         self.panel = p
     }
 
-    /// Pill frame in screen coordinates. Width is fixed at "widest
-    /// possible activity" so the SwiftUI shape inside can animate without
-    /// the NSPanel itself resizing — same trick `NotchWindowController`
-    /// uses for the expanded shell.
+    /// Pill frame in screen coordinates. Width AND height are fixed at
+    /// "widest + tallest possible activity" so the SwiftUI shape inside
+    /// can animate without the NSPanel itself resizing — same trick
+    /// `NotchWindowController` uses for the expanded shell. The pill
+    /// sits at the top of the panel; the space below the pill is
+    /// transparent + non-hit-testable so it doesn't capture stray
+    /// clicks while activities are at their default (flush) height.
     private func idleFrame() -> NSRect? {
         guard let placement = NotchGeometry.placement(), placement.hasNotch else {
             return nil
         }
         let notch = placement.collapsedSize
         let width = notch.width + Self.widthExtension * 2 + Self.maxActivityExtraWidth * 2
-        let height = notch.height + Self.heightExtension
+        let height = notch.height + Self.heightExtension + Self.maxActivityExtraHeight
         let x = placement.screen.frame.midX - width / 2
         let y = placement.screen.frame.maxY - height
         return NSRect(x: x, y: y, width: width, height: height)
@@ -201,9 +230,14 @@ private struct IdleNotchPillView: View {
     var body: some View {
         // Top-aligned inside the NSPanel frame: the shape grows downward
         // from the screen top so the notch stays anchored visually.
+        // The Spacer below the pill carries `allowsHitTesting(false)`
+        // so clicks in the empty area beneath the pill pass through
+        // to whatever's behind (menu bar, wallpaper) instead of being
+        // captured by the panel.
         VStack(spacing: 0) {
             pill
             Spacer(minLength: 0)
+                .allowsHitTesting(false)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea(.all, edges: .top)
@@ -211,16 +245,19 @@ private struct IdleNotchPillView: View {
 
     private var pill: some View {
         let size = engine.model.size
-        let baseRadius = size.height / 3
+        let baseRadius = min(size.height, 32) / 3
         let topRadius = max(0, baseRadius - 4)
         let bottomRadius = baseRadius
 
         return ZStack {
+            // Background shape — never hit-testable so it doesn't eat
+            // clicks meant for whatever's behind the inward curves.
             InwardNotchShape(
                 topCornerRadius: topRadius,
                 bottomCornerRadius: bottomRadius
             )
             .fill(Color.black)
+            .allowsHitTesting(false)
 
             if let activity = engine.model.current {
                 activity.makeView()

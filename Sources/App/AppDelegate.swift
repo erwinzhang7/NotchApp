@@ -18,7 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let powerSource = PowerActivitySource()
     private let bluetoothSource = BluetoothActivitySource()
     private lazy var nowPlayingBridge = NowPlayingActivityBridge(
-        nowPlaying: MediaControls.shared.state
+        nowPlaying: MediaControls.shared.state,
+        lyrics: MediaControls.shared.lyrics
     )
     /// Default temporary-notification duration. Hardcoded because the
     /// settings sheet that would have hosted per-event durations isn't
@@ -195,13 +196,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] event in
                 guard let self else { return }
                 switch event {
-                case .started(let snapshot), .updated(let snapshot):
-                    self.idleNotchPill.engine.showLiveActivity(
-                        NowPlayingActivity(snapshot: snapshot)
-                    )
+                case .started(let activity), .updated(let activity):
+                    self.idleNotchPill.engine.showLiveActivity(activity)
                 case .stopped:
                     self.idleNotchPill.engine.hideLiveActivity(
-                        id: NowPlayingActivity(snapshot: .init(title: "", artist: "", artwork: nil)).id
+                        id: NowPlayingActivity(
+                            snapshot: .init(title: "", artist: "", artwork: nil),
+                            showsLyrics: false
+                        ).id
                     )
                 }
             }

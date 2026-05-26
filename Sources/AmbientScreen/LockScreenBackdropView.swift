@@ -69,12 +69,12 @@ struct LockScreenBackdropView: View {
     /// white is the closest sensible approximation).
     private var clockOverlay: some View {
         TimelineView(.periodic(from: .now, by: 1)) { ctx in
-            VStack(spacing: -4) {
+            VStack(spacing: -12) {
                 Text(Self.dateString(for: ctx.date))
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(Self.clockGradient)
                 Text(Self.timeString(for: ctx.date))
-                    .font(.system(size: 150, weight: .bold))
+                    .font(.system(size: 128, weight: .bold))
                     .foregroundStyle(Self.clockGradient)
                     .monospacedDigit()
             }

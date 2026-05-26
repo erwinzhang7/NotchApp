@@ -54,9 +54,22 @@ final class LockScreenMusicWidgetController {
 
     private var ambient: AmbientSettings { AmbientSettings.shared }
 
-    /// Panel dimensions, tuned to fit artwork + title/artist + scrubber +
-    /// transport buttons with a comfortable margin.
-    private static let panelSize = NSSize(width: 480, height: 540)
+    /// Panel dimensions for the compact card + lifted-no-lyrics layout.
+    /// Tuned to fit artwork + title/artist + scrubber + transport with a
+    /// comfortable margin.
+    private static let compactPanelSize = NSSize(width: 480, height: 540)
+    /// Wider panel for the lifted-with-lyrics layout: room for the
+    /// existing left column at unchanged sizes plus a 320pt lyrics
+    /// column with 24pt spacing and the card's 16pt outer padding on
+    /// both sides.
+    private static let lyricsPanelSize = NSSize(width: 720, height: 540)
+    /// Stable consumer key the controller uses to subscribe to the
+    /// lyrics service. String constant so registration is idempotent.
+    private static let lyricsConsumerKey = "lockScreen"
+
+    /// Current size — flips between compact and lyrics dimensions in
+    /// response to the lift / lyrics-setting combination.
+    private var currentPanelSize: NSSize = LockScreenMusicWidgetController.compactPanelSize
 
     // MARK: - Lifecycle
 
@@ -75,6 +88,19 @@ final class LockScreenMusicWidgetController {
         ambient.$lockScreenWidgetVerticalOffset
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.recenter() }
+            .store(in: &cancellables)
+
+        // Lyrics-mode panel-resize: when the lifted+lyrics combination
+        // becomes active, the card needs the wider panel. Re-evaluated
+        // on either input changing; resize is animated for continuity
+        // with the artwork-lift spring.
+        ambient.$showLockScreenLyrics
+            .combineLatest(cardState.$isArtworkLifted)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] showLyrics, isLifted in
+                self?.applyLyricsModeResize(showLyrics: showLyrics, isLifted: isLifted)
+                self?.applyLyricsConsumerState(showLyrics: showLyrics)
+            }
             .store(in: &cancellables)
     }
 
@@ -218,10 +244,47 @@ final class LockScreenMusicWidgetController {
     /// whenever the offset slider moves.
     private func recenter() {
         guard let panel, let screen = NSScreen.main?.frame else { return }
-        let size = Self.panelSize
         panel.setFrame(
-            NSRect(origin: position(on: screen, size: size), size: size),
+            NSRect(origin: position(on: screen, size: currentPanelSize), size: currentPanelSize),
             display: true
+        )
+    }
+
+    /// Swap panel size between the compact and lyrics dimensions.
+    /// Animated so the resize moves with the SwiftUI lift spring rather
+    /// than snapping mid-transition.
+    ///
+    /// Deferred one main-queue cycle. The sink driving this fires from
+    /// a `withAnimation { cardState.isArtworkLifted.toggle() }` inside
+    /// the SwiftUI tap handler — i.e. mid-layout-pass. Calling
+    /// `panel.animator().setFrame(...)` synchronously from there
+    /// produces the `_NSDetectedLayoutRecursion` warning. One async
+    /// hop pushes the AppKit frame change out of the SwiftUI layout
+    /// pass cleanly.
+    private func applyLyricsModeResize(showLyrics: Bool, isLifted: Bool) {
+        let target = (showLyrics && isLifted) ? Self.lyricsPanelSize : Self.compactPanelSize
+        guard target != currentPanelSize else { return }
+        currentPanelSize = target
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let panel = self.panel, let screen = NSScreen.main?.frame else { return }
+            let origin = self.position(on: screen, size: target)
+            let frame = NSRect(origin: origin, size: target)
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.42
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                panel.animator().setFrame(frame, display: true)
+            })
+        }
+    }
+
+    /// Register or unregister the lock-screen card as a lyrics consumer.
+    /// Drives on-demand fetching: lyrics service only hits LRCLIB while
+    /// at least one consumer is active.
+    private func applyLyricsConsumerState(showLyrics: Bool) {
+        MediaControls.shared.lyrics.setConsumer(
+            Self.lyricsConsumerKey,
+            active: showLyrics
         )
     }
 
@@ -337,7 +400,7 @@ final class LockScreenMusicWidgetController {
     // MARK: - Panel
 
     private func makePanel() -> NSPanel {
-        let size = Self.panelSize
+        let size = currentPanelSize
         // Position the widget per current settings (center + user offset).
         // SkyLight space pins it there across spaces.
         let screen = NSScreen.main?.frame ?? .zero
@@ -378,6 +441,8 @@ final class LockScreenMusicWidgetController {
         let root = LockScreenMusicCardView(
             state: MediaControls.shared.state,
             cardState: cardState,
+            lyricsService: MediaControls.shared.lyrics,
+            ambient: ambient,
             adapter: MediaControls.shared.adapter
         )
         // FirstMouseHostingView lets clicks register on the first hit even

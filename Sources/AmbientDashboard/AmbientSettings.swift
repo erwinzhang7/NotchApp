@@ -41,6 +41,14 @@ final class AmbientSettings: ObservableObject {
         didSet { UserDefaults.standard.set(lockScreenWidgetVerticalOffset, forKey: Keys.lockScreenWidgetVerticalOffset) }
     }
 
+    /// When the lock-screen widget's artwork is in its lifted (big) state,
+    /// show a scrolling lyrics column to the right of the artwork +
+    /// controls. No effect on the compact state. Drives on-demand lyrics
+    /// fetching — when off, no LRCLIB calls happen for the lock surface.
+    @Published var showLockScreenLyrics: Bool {
+        didSet { UserDefaults.standard.set(showLockScreenLyrics, forKey: Keys.showLockScreenLyrics) }
+    }
+
     private enum Keys {
         static let showCalendar                       = "ambient.showCalendar"
         static let showReminders                      = "ambient.showReminders"
@@ -48,6 +56,7 @@ final class AmbientSettings: ObservableObject {
         static let lockScreenWidgetEnabled            = "lockScreenWidget.enabled"
         static let lockScreenWidgetIdleTimeoutSeconds = "lockScreenWidget.idleTimeoutSeconds"
         static let lockScreenWidgetVerticalOffset     = "lockScreenWidget.verticalOffset"
+        static let showLockScreenLyrics               = "lockScreenWidget.showLyrics"
     }
 
     init() {
@@ -59,6 +68,7 @@ final class AmbientSettings: ObservableObject {
             Keys.lockScreenWidgetEnabled:            false,
             Keys.lockScreenWidgetIdleTimeoutSeconds: 180,
             Keys.lockScreenWidgetVerticalOffset:     0,
+            Keys.showLockScreenLyrics:               false,
         ])
         self.showCalendar                       = defaults.bool(forKey: Keys.showCalendar)
         self.showReminders                      = defaults.bool(forKey: Keys.showReminders)
@@ -66,5 +76,6 @@ final class AmbientSettings: ObservableObject {
         self.lockScreenWidgetEnabled            = defaults.bool(forKey: Keys.lockScreenWidgetEnabled)
         self.lockScreenWidgetIdleTimeoutSeconds = defaults.integer(forKey: Keys.lockScreenWidgetIdleTimeoutSeconds)
         self.lockScreenWidgetVerticalOffset     = defaults.double(forKey: Keys.lockScreenWidgetVerticalOffset)
+        self.showLockScreenLyrics               = defaults.bool(forKey: Keys.showLockScreenLyrics)
     }
 }

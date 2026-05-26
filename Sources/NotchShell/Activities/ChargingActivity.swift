@@ -125,6 +125,13 @@ private struct FullPowerActivityView: View {
 /// explicit wing widths so leading and trailing don't fight over the
 /// leftover space (was causing long labels to spill into the camera
 /// dead-zone). Each activity sizes its own wings to fit its content.
+///
+/// Content alignment: leading wing is **left-aligned** (icon + title
+/// hug the outer left edge of the pill) and trailing wing is
+/// **right-aligned** (value hugs the outer right edge). Per user
+/// preference — was previously snug against the camera, which left a
+/// gap between the box edge and the text and gave a "floating in the
+/// middle" feel.
 struct ActivityRibbon: View {
     @Environment(\.physicalNotchWidth) private var physicalNotchWidth
 
@@ -135,16 +142,16 @@ struct ActivityRibbon: View {
     let title: String
     let trailing: String
 
-    /// Padding kept clear on the camera-side of each wing. 8pt gives
-    /// the text breathing room from the lens AND clears the inward top
-    /// curve (`baseHeight/3 - 4 ≈ 6.7pt`).
-    private let cameraSidePadding: CGFloat = 8
+    /// Padding kept clear on the outer (box-edge) side of each wing.
+    /// 10pt sits a little inside the inward top curve so the icon
+    /// doesn't get clipped on the rounded corner.
+    private let edgePadding: CGFloat = 10
 
     var body: some View {
         HStack(spacing: 0) {
-            // Leading wing — right-aligned so the symbol + title sit
-            // snug against the camera cutout. Fixed width per activity
-            // so content can't reflow into the dead-zone.
+            // Leading wing — left-aligned, icon + title flush against
+            // the left edge of the pill (with edgePadding so they
+            // clear the inward top-corner curve).
             HStack(spacing: 5) {
                 Image(systemName: leadingSymbol)
                     .font(.system(size: 12, weight: .semibold))
@@ -155,8 +162,8 @@ struct ActivityRibbon: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            .padding(.trailing, cameraSidePadding)
-            .frame(width: leadingWingWidth, alignment: .trailing)
+            .padding(.leading, edgePadding)
+            .frame(width: leadingWingWidth, alignment: .leading)
 
             // Camera dead-zone — exact notch width, transparent so the
             // black pill behind shows through (and the camera lens
@@ -164,14 +171,15 @@ struct ActivityRibbon: View {
             Color.clear
                 .frame(width: physicalNotchWidth)
 
-            // Trailing wing — left-aligned for the same reason.
+            // Trailing wing — right-aligned, value flush against the
+            // right edge of the pill.
             Text(trailing)
                 .font(.system(size: 12, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(.white)
                 .lineLimit(1)
-                .padding(.leading, cameraSidePadding)
-                .frame(width: trailingWingWidth, alignment: .leading)
+                .padding(.trailing, edgePadding)
+                .frame(width: trailingWingWidth, alignment: .trailing)
         }
         .frame(maxHeight: .infinity)
     }

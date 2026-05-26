@@ -53,14 +53,27 @@ final class BluetoothActivitySource: ObservableObject {
     }
 
     /// IOBluetooth selector — old-school Objective-C bridging. The
-    /// notification fires for every connection; we synthesize an event
-    /// for the engine and register a one-shot disconnect watcher so
-    /// `lastConnected` clears when the device drops.
+    /// notification fires for every connection. We filter to
+    /// audio-class devices with a real name so the noise from random
+    /// background pairings (mice, keyboards, watches, system services)
+    /// doesn't keep popping the activity. Audio devices get an activity
+    /// + a one-shot disconnect watcher so `lastConnected` clears when
+    /// they drop.
     @objc private func handleConnection(_ notification: IOBluetoothUserNotification, device: IOBluetoothDevice) {
-        let resolved = ConnectedDevice(
-            name: device.name ?? device.addressString ?? "Bluetooth Device",
-            type: BluetoothDeviceKind.from(classOfDevice: device.classOfDevice)
-        )
+        let kind = BluetoothDeviceKind.from(classOfDevice: device.classOfDevice)
+        let rawName = device.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let hasUsableName = !rawName.isEmpty
+
+        // Skip notifications for:
+        // - non-audio devices (mice, keyboards, watches, etc.)
+        // - devices with no resolvable name (system probe-pairings)
+        // Both groups produced confusing pop-ups in testing and
+        // overwhelmed the activity area on this Mac.
+        guard kind != .generic, hasUsableName else {
+            return
+        }
+
+        let resolved = ConnectedDevice(name: rawName, type: kind)
 
         lastConnected = resolved
         events.send(.connected(resolved))
@@ -112,7 +125,11 @@ enum BluetoothDeviceKind: Equatable {
         case .airpods:    return "airpods"
         case .headphones: return "headphones"
         case .speaker:    return "hifispeaker.fill"
-        case .generic:    return "bluetooth"
+        // No real "bluetooth" SF Symbol exists; the radio-waves glyph
+        // is the closest stand-in. Was previously `"bluetooth"` which
+        // logged "No symbol named 'bluetooth' found in system symbol set"
+        // and rendered a blank.
+        case .generic:    return "dot.radiowaves.left.and.right"
         }
     }
 
