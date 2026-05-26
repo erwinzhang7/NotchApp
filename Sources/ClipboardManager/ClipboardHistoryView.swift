@@ -13,17 +13,26 @@ struct ClipboardHistoryView: View {
     /// so the standalone history window doesn't need to wire anything.
     var onCopy: (() -> Void)? = nil
 
+    /// Whether to render the search field + divider above the list. Off in
+    /// the notch's shrunk Clip mode (music-only ambient) where the panel
+    /// is too short to spend rows on search chrome.
+    var showSearch: Bool = true
+
     /// ID of the item that was just copied; drives the per-row feedback flash.
     @State private var lastCopiedID: ClipboardItem.ID?
     @State private var feedbackTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
-            searchField
-            Divider()
+            if showSearch {
+                searchField
+                Divider()
+            }
             content
         }
-        .frame(minWidth: 240, minHeight: 200)
+        // minHeight only applies in standalone use; the notch's shrunk
+        // layout can't afford 200pt and squeezes naturally.
+        .frame(minWidth: 240, minHeight: showSearch ? 200 : 0)
         // Pure black so the clipboard surface matches the notch / tab
         // strip without the .bar / system-list grey breaking the tone.
         .background(Color.black)

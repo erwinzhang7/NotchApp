@@ -11,6 +11,11 @@ final class NotchState: ObservableObject {
     @Published var isDragTargeted: Bool = false
     @Published private(set) var isHeldOpen: Bool = false
 
+    /// Currently selected tab. Mirrored from NotchShellView's @AppStorage so
+    /// NotchWindowController can re-size the panel on tab change (Clip needs
+    /// more vertical room than music-only Ambient).
+    @Published var selectedTab: NotchTab = NotchTab(rawValue: UserDefaults.standard.string(forKey: "notch.selectedTab") ?? "") ?? .ambient
+
     /// The shell is expanded if anything is keeping it open: hover, explicit pin, the
     /// post-paste hold, or an active drag-and-drop targeting the panel.
     var isExpanded: Bool { isHovered || isPinned || isHeldOpen || isDragTargeted }

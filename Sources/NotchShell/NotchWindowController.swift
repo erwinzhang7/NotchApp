@@ -206,14 +206,22 @@ final class NotchWindowController: NSObject {
         }
     }
 
-    /// Expanded panel size as a function of ambient settings. Music is
-    /// always present; the bottom row (Calendar/Reminders) appears when
-    /// either toggle is on and contributes a fixed extra height. When both
-    /// toggles are off, the panel shrinks to music-only — no empty space.
+    /// Expanded panel size as a function of ambient settings. Same height
+    /// for both tabs — Clip adapts to whatever height Ambient asks for
+    /// (compact one-file + bare list when music-only; full search + strip
+    /// when there's a bottom row).
+    ///
+    /// The tab strip sits inside the expanded panel at the notch's height,
+    /// so we include `collapsedSize.height` here too. Without it the panel
+    /// was 38pt short and the tab strip slid up over the fixed-height
+    /// music view.
     private func computeExpandedSize() -> CGSize {
         let width = NotchGeometry.defaultExpandedSize.width
         let hasBottom = ambient.showCalendar || ambient.showReminders
-        let height = Self.ambientMusicHeight + (hasBottom ? Self.ambientBottomHeight : 0)
+        let tabStrip = layoutModel.collapsedSize.height
+        let height = tabStrip
+            + Self.ambientMusicHeight
+            + (hasBottom ? Self.ambientBottomHeight : 0)
         return CGSize(width: width, height: height)
     }
 

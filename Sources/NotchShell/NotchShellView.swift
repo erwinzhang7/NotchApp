@@ -13,6 +13,13 @@ struct NotchShellView: View {
     @AppStorage("notch.selectedTab") private var selectedTab: NotchTab = .ambient
     @ObservedObject private var appSettings = AmbientSettings.shared
 
+    /// Keep NotchState.selectedTab synchronized with the @AppStorage value so
+    /// NotchWindowController can re-size the panel on tab switch — the
+    /// controller observes NotchState, not UserDefaults.
+    private func syncTabToState() {
+        if state.selectedTab != selectedTab { state.selectedTab = selectedTab }
+    }
+
     /// Must stay in sync with NotchGeometry.hoverSlop.
     private let hoverSlop: CGFloat = 5
 
@@ -107,6 +114,8 @@ struct NotchShellView: View {
         // this, SwiftUI's automatic top safe-area inset (notch height) pushes
         // the content down and leaves a visible gap above the panel.
         .ignoresSafeArea(.all, edges: .top)
+        .onAppear { syncTabToState() }
+        .onChange(of: selectedTab) { _, _ in syncTabToState() }
         // Panel-wide drop catcher. The NSPanel frame is always sized for the expanded
         // surface + slop (~528×424), so this drop zone exists whether or not the SwiftUI
         // content is currently in its collapsed pill — that's how a drag toward a
@@ -204,12 +213,30 @@ struct NotchShellView: View {
 struct ClipTabContent: View {
     @ObservedObject var clipboardStore: ClipboardStore
     @ObservedObject var shelfStore: FileShelfStore
+    @ObservedObject private var ambient = AmbientSettings.shared
     var isDragTargeted: Bool
     var onCopy: () -> Void
+
+    /// The Ambient pane shrinks to music-only when both bottom toggles are
+    /// off; the Clip tab inherits that height. In shrunk mode there isn't
+    /// room for a search field or a horizontal shelf strip, so the layout
+    /// switches to a single left-aligned file slot (capacity 1, drag-out
+    /// supported) + the bare clipboard list.
+    private var isShrunk: Bool {
+        !ambient.showCalendar && !ambient.showReminders
+    }
 
     private var shelfVisible: Bool { shelfStore.hasItems || isDragTargeted }
 
     var body: some View {
+        if isShrunk {
+            shrunkBody
+        } else {
+            fullBody
+        }
+    }
+
+    private var fullBody: some View {
         VStack(spacing: 0) {
             if shelfVisible {
                 FileShelfStripView(store: shelfStore, isTargeted: isDragTargeted)
@@ -221,5 +248,53 @@ struct ClipTabContent: View {
             ClipboardHistoryView(store: clipboardStore, onCopy: onCopy)
         }
         .animation(.easeInOut(duration: 0.22), value: shelfVisible)
+    }
+
+    private var shrunkBody: some View {
+        HStack(spacing: 0) {
+            if shelfStore.hasItems || isDragTargeted {
+                compactSlot
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
+                Rectangle()
+                    .fill(Color.white.opacity(0.12))
+                    .frame(width: 1)
+                    .transition(.opacity)
+            }
+            ClipboardHistoryView(
+                store: clipboardStore,
+                onCopy: onCopy,
+                showSearch: false
+            )
+        }
+        .animation(.easeInOut(duration: 0.22), value: shelfStore.hasItems)
+        .animation(.easeInOut(duration: 0.22), value: isDragTargeted)
+    }
+
+    /// Single-file slot used in the shrunk Clip layout. Square: width
+    /// equals the available content height (= NotchWindowController's
+    /// ambientMusicHeight, 160). Thumbnail of the top-of-stack file
+    /// centered inside; empty drag-target shows a drop hint. Drag-out +
+    /// remove-on-hover come from FileShelfTileView itself.
+    @ViewBuilder
+    private var compactSlot: some View {
+        ZStack {
+            if isDragTargeted {
+                Color.white.opacity(0.08)
+            }
+            if let topItem = shelfStore.items.last {
+                FileShelfTileView(item: topItem, store: shelfStore)
+            } else if isDragTargeted {
+                VStack(spacing: 4) {
+                    Image(systemName: "arrow.down.to.line.compact")
+                        .font(.system(size: 22))
+                    Text("Drop")
+                        .font(.caption.weight(.medium))
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+        }
+        // 160 matches NotchWindowController.ambientMusicHeight so the
+        // slot is a true square against the available vertical space.
+        .frame(width: 160, height: 160)
     }
 }
