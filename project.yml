@@ -24,6 +24,12 @@ targets:
     sources:
       - path: Sources
       - path: Resources
+      - path: LICENSE
+        buildPhase: resources
+        type: file
+      - path: NOTICE
+        buildPhase: resources
+        type: file
       - path: Vendor/MediaRemoteAdapter/mediaremote-adapter.pl
         buildPhase: resources
         type: file
