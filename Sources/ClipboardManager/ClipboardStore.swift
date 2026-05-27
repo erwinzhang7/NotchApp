@@ -45,10 +45,16 @@ final class ClipboardStore: ObservableObject {
 
     // MARK: - Mutations
 
-    func add(_ item: ClipboardItem) {
+    /// Returns true if the item was inserted, false if it was suppressed
+    /// by the consecutive-dedup check. Callers (e.g. SelectionMonitor)
+    /// use the return value to decide whether to fire downstream effects
+    /// like the "Copied N characters" notch banner.
+    @discardableResult
+    func add(_ item: ClipboardItem) -> Bool {
         // Dedup consecutive identical captures only (per spec).
-        if let head = items.first, head.fingerprint == item.fingerprint { return }
+        if let head = items.first, head.fingerprint == item.fingerprint { return false }
         items.insert(item, at: 0)
+        return true
     }
 
     func remove(_ item: ClipboardItem) {

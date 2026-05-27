@@ -26,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         brightness: brightnessSource,
         volume: volumeSource
     )
+    /// Standalone "Copied N characters" banner that drops down BELOW
+    /// the notch when the auto-copy-on-selection feature fires. Has
+    /// its own NSPanel so it doesn't fight for screen space with the
+    /// idle pill (now-playing, charging, etc.).
+    private let copyBanner = CopyBannerController()
     private lazy var nowPlayingBridge = NowPlayingActivityBridge(
         nowPlaying: MediaControls.shared.state
     )
@@ -86,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         brightnessSource.stop()
         volumeSource.stop()
         mediaKeySuppressor.stop()
+        copyBanner.stop()
         nowPlayingBridge.stop()
         idleNotchPill.stop()
         lockScreenWidget.stop()
@@ -236,6 +242,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
         volumeSource.start()
+
+        // Auto-copy-on-selection → notch banner. The selection monitor
+        // only fires when the captured text actually entered the store
+        // (consecutive-dedup miss), so we don't need to re-check here.
+        // Skip while the lock screen owns the display — the idle pill
+        // is hidden in that state.
+        ClipboardManager.shared.selectionCopiedEvents
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] copied in
+                guard let self else { return }
+                if self.lockScreenWidget.lockObserver.isLocked { return }
+                self.copyBanner.show(
+                    characterCount: copied.characterCount,
+                    lineCount: copied.lineCount
+                )
+            }
+            .store(in: &cancellables)
 
         nowPlayingBridge.events
             .receive(on: DispatchQueue.main)

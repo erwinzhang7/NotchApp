@@ -43,28 +43,38 @@ final class ClipboardSettings: ObservableObject {
     @Published var captureFiles: Bool {
         didSet { defaults.set(captureFiles, forKey: Keys.captureFiles) }
     }
+    /// When on, NotchApp watches text selection across all apps via the
+    /// Accessibility API and pushes selected text into the clipboard
+    /// history. Opt-in because the underlying capability requires an
+    /// Accessibility grant. Off by default.
+    @Published var autoCopySelection: Bool {
+        didSet { defaults.set(autoCopySelection, forKey: Keys.autoCopySelection) }
+    }
 
     private let defaults: UserDefaults
 
     private enum Keys {
-        static let autoClear     = "clipboard.autoClearInterval"
-        static let captureText   = "clipboard.captureText"
-        static let captureImages = "clipboard.captureImages"
-        static let captureFiles  = "clipboard.captureFiles"
+        static let autoClear         = "clipboard.autoClearInterval"
+        static let captureText       = "clipboard.captureText"
+        static let captureImages     = "clipboard.captureImages"
+        static let captureFiles      = "clipboard.captureFiles"
+        static let autoCopySelection = "clipboard.autoCopySelection"
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [
-            Keys.autoClear:     AutoClearInterval.never.rawValue,
-            Keys.captureText:   true,
-            Keys.captureImages: true,
-            Keys.captureFiles:  true,
+            Keys.autoClear:         AutoClearInterval.never.rawValue,
+            Keys.captureText:       true,
+            Keys.captureImages:     true,
+            Keys.captureFiles:      true,
+            Keys.autoCopySelection: false,
         ])
         let rawInterval = defaults.string(forKey: Keys.autoClear) ?? AutoClearInterval.never.rawValue
-        self.autoClearInterval = AutoClearInterval(rawValue: rawInterval) ?? .never
-        self.captureText   = defaults.bool(forKey: Keys.captureText)
-        self.captureImages = defaults.bool(forKey: Keys.captureImages)
-        self.captureFiles  = defaults.bool(forKey: Keys.captureFiles)
+        self.autoClearInterval  = AutoClearInterval(rawValue: rawInterval) ?? .never
+        self.captureText        = defaults.bool(forKey: Keys.captureText)
+        self.captureImages      = defaults.bool(forKey: Keys.captureImages)
+        self.captureFiles       = defaults.bool(forKey: Keys.captureFiles)
+        self.autoCopySelection  = defaults.bool(forKey: Keys.autoCopySelection)
     }
 }

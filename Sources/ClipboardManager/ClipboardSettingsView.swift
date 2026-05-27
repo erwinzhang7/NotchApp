@@ -38,6 +38,15 @@ struct ClipboardSettingsView: View {
             }
 
             Section {
+                Toggle("Auto-copy highlighted text", isOn: $settings.autoCopySelection)
+                Text("Requires Accessibility permission. Skipped when the highlighted text already matches the most recent clipboard entry.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Selection")
+            }
+
+            Section {
                 Text("Clipboard history is kept in memory only and is never written to disk.")
                     .font(.callout)
                     .foregroundStyle(.secondary)

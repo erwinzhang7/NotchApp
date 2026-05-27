@@ -29,7 +29,8 @@ final class IdleNotchPillController {
     /// (bluetooth at ~170pt leading + 90pt trailing).
     private static let maxActivityExtraWidth: CGFloat = 200
     /// Flush with the physical notch height — no activity grows
-    /// vertically (lyrics live in the expanded shell, not the pill).
+    /// vertically (lyrics live in the expanded shell, not the pill;
+    /// the copy banner lives in its own panel below the notch).
     private static let heightExtension: CGFloat = 0
 
     private let shellState: NotchState
