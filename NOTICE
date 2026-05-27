@@ -51,7 +51,30 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-2. NotchDrop  [INSPIRATION — NOT COPIED]
+2. DynamicNotch  [ADAPTED SOURCE / BEHAVIOR]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Source:    https://github.com/jackson-storm/DynamicNotch
+Use:       Adapted source and behavior for the activity model/engine,
+           notch shape and animations, activity views, lock observation,
+           artwork/equalizer handling, and lyrics components.
+License:   GNU General Public License v3.0
+Copyright: (c) Evgeniy Petrukovich and contributors
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+3. Atoll  [ADAPTED PRESENTATION PATTERNS]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Source:    https://github.com/Ebullioscopic/Atoll
+Use:       Adapted lock-screen/panel presentation patterns and Dynamic
+           Island layout behavior.
+License:   GNU General Public License v3.0
+Copyright: (c) Ebullioscopic and contributors
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+4. NotchDrop  [INSPIRATION — NOT COPIED]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Source:    https://github.com/Lakr233/NotchDrop
@@ -63,12 +86,16 @@ Copyright: (c) Lakr233 and contributors
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-3. boringNotch  [REFERENCED — NOT COPIED, NOT LINKED]
+5. boringNotch  [REFERENCED]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Source:    https://github.com/TheBoredTeam/boring.notch
-Use:       Referenced for media integration approach during development.
-           No source code from boringNotch is copied, included, or linked
-           into NotchApp. The GPL-2.0 license does not propagate to NotchApp.
-License:   GPL-2.0
+Use:       Referenced for media integration approach during development;
+           also part of the GPL-3.0 project lineage documented by Atoll.
+License:   GNU General Public License v3.0
 Copyright: (c) TheBoredTeam and contributors
+
+
+NotchApp is distributed under the GNU General Public License v3.0. The
+bundled mediaremote-adapter component remains available under its BSD
+3-Clause license as stated above.

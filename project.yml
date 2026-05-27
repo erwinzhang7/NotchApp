@@ -60,7 +60,7 @@ targets:
         # data transfer. Without this key, IOBluetoothDevice.register(...)
         # hard-crashes the process on first call.
         INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription: "NotchApp shows a notch activity when Bluetooth devices like AirPods connect."
-        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Erwin Zhang. MIT License."
+        INFOPLIST_KEY_NSHumanReadableCopyright: "Copyright © 2026 Erwin Zhang. GNU GPL v3."
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
         GENERATE_INFOPLIST_FILE: YES
         COMBINE_HIDPI_IMAGES: YES

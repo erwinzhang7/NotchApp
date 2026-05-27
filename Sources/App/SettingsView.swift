@@ -92,7 +92,7 @@ struct AmbientSettingsView: View {
                 .disabled(!ambient.lockScreenWidgetEnabled)
                 Toggle("Show lyrics when artwork is enlarged", isOn: $ambient.showLockScreenLyrics)
                     .disabled(!ambient.lockScreenWidgetEnabled)
-                Text("Synced lyrics from LRCLIB appear to the right of the lifted artwork. Only fetched while this is on. Compact view is unchanged. Toggle lyrics in the notch by clicking the artwork.")
+                Text("Synced lyrics from LRCLIB appear to the right of the lifted artwork. Lyrics are prefetched during playback so they are ready when shown. Compact view is unchanged. Toggle lyrics in the notch by clicking the artwork.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Text("Small music card centered horizontally above the lock screen and shown when the Mac is idle. Hidden while you're using the Mac (or while caffeinate / similar is keeping it awake). Uses a private macOS API and may break in future macOS updates.")
@@ -148,4 +148,3 @@ struct AmbientSettingsView: View {
         lyricsCacheBytes = MediaControls.shared.lyrics.diskCacheSizeBytes()
     }
 }
-

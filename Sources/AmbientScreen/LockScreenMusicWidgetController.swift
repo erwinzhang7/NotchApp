@@ -308,9 +308,8 @@ final class LockScreenMusicWidgetController {
         )
     }
 
-    /// Register or unregister the lock-screen card as a lyrics consumer.
-    /// Drives on-demand fetching: lyrics service only hits LRCLIB while
-    /// at least one consumer is active.
+    /// Forward lock-screen lyrics visibility through the legacy consumer API.
+    /// LyricsService currently prefetches independently of consumers.
     private func applyLyricsConsumerState(showLyrics: Bool) {
         let start = Date()
         NSLog("[Toggle] applyLyricsConsumerState showLyrics=%@", showLyrics ? "Y" : "N")

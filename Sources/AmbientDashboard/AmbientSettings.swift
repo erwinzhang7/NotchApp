@@ -43,8 +43,8 @@ final class AmbientSettings: ObservableObject {
 
     /// When the lock-screen widget's artwork is in its lifted (big) state,
     /// show a scrolling lyrics column to the right of the artwork +
-    /// controls. No effect on the compact state. Drives on-demand lyrics
-    /// fetching — when off, no LRCLIB calls happen for the lock surface.
+    /// controls. No effect on the compact state. Lyrics may already be
+    /// prefetched by the playback service before this display toggle is on.
     @Published var showLockScreenLyrics: Bool {
         didSet { UserDefaults.standard.set(showLockScreenLyrics, forKey: Keys.showLockScreenLyrics) }
     }

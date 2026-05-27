@@ -1,6 +1,6 @@
 # NotchApp
 
-A macOS notch utility that turns the MacBook notch into a live control surface: clipboard history, drag-and-drop file shelf, media controls, a calendar and reminders dashboard, and file conversion — all tucked behind the notch, out of the way until you need them.
+A macOS notch utility that turns the MacBook notch into a live control surface: Dynamic Island-style activities, clipboard history, drag-and-drop file shelf, media controls, a calendar and reminders dashboard, lock-screen presentation, and file conversion — all tucked behind the notch, out of the way until you need them.
 
 Built in Swift + SwiftUI. Runs as a menu-bar agent (no dock icon). macOS 15+.
 
@@ -23,6 +23,10 @@ Built in Swift + SwiftUI. Runs as a menu-bar agent (no dock icon). macOS 15+.
 
 **File Conversion** — Right-click a shelved image or PDF to convert it. Output formats are capability-tested at launch against the running ImageIO stack — only formats the current macOS build can actually encode appear in the menu, so you can't pick a target that would silently fail.
 
+**Dynamic Island Activities** — An always-visible compact pill displays now-playing while audio is active and temporary ribbons for AC connection, battery thresholds, and Bluetooth audio-device connections.
+
+**Lock Screen Widget** — An optional music card and lock/unlock notch indicator render during lock presentation or configured system idle time. Unlock uses its own lock-indicator animation path rather than the activity engine.
+
 ---
 
 ## Architecture
@@ -35,6 +39,7 @@ Sources/
 ├── FileShelf/            Drag-drop shelf, security-scoped bookmarks
 ├── MediaControls/        Now-playing state, transport, per-player seek routing
 ├── AmbientDashboard/     Layout + settings for the ambient pane
+├── AmbientScreen/        Optional lock-screen music + lock/unlock indicator
 ├── Calendar/             EventKit wrapper, CalendarService, CalendarView
 ├── Reminders/            EventKit wrapper, RemindersService, RemindersView
 ├── Conversion/           Converter registry, ImageIO capability self-test
@@ -46,9 +51,15 @@ Sources/
 
 A borderless, non-activating `NSPanel` floating at the status-bar window level, joined to all Spaces. Geometry is computed from `NSScreen.safeAreaInsets.top` (physical notch height) and the gap between `auxiliaryTopLeftArea` and `auxiliaryTopRightArea` (notch width). On displays without a notch the panel falls back to a fixed size pinned top-center, just below the menu bar. Re-positioned on `NSApplication.didChangeScreenParametersNotification` to survive display changes and sleep/wake.
 
+The app has three notch-position presentation paths:
+
+1. The interactive shell expands on hover, click-to-pin, or file drag/drop.
+2. The idle Dynamic Island-style pill hosts activities from three source families: power, Bluetooth audio connections, and now-playing.
+3. The optional lock-screen presentation uses a separate panel and observer route for pre-lock, lock, idle, and the post-unlock icon/shrink animation.
+
 ### In-memory privacy model
 
-Clipboard content and file shelf entries exist only in RAM. `ClipboardStore` and `FileShelfStore` are plain Swift arrays — no SQLite, no `UserDefaults` payload, no file writes for content. Only user *preferences* (auto-clear interval, capture toggles) are persisted. This is load-bearing: the app can make a hard guarantee that clipboard content doesn't survive a quit.
+Clipboard content exists only in RAM. `ClipboardStore` is a plain Swift array with no persisted clipboard payload; clipboard content does not survive a quit. The file shelf holds security-scoped bookmark references in memory rather than copying file bytes. Preferences and lyrics cache data may be persisted separately.
 
 ### MediaRemote entitlement lockdown and the Perl adapter
 
@@ -110,25 +121,27 @@ xattr -dr com.apple.quarantine /Applications/NotchApp.app
 
 ### Permission prompts
 
-NotchApp will request the following permissions on first use — never at launch without user action:
+NotchApp may request the following permissions as the related feature first becomes active:
 
 | Permission | When | Why |
 |---|---|---|
 | **Calendars** | First open of Ambient tab → Grant Access | Displays today's events via EventKit |
 | **Reminders** | First open of Ambient tab → Grant Access | Displays scheduled reminders via EventKit |
 | **Automation (Spotify)** | First scrub of a Spotify track | Sends `set player position to` via AppleScript |
+| **Bluetooth** | Activity monitoring begins / Bluetooth is first accessed | Displays an activity when a named audio device connects |
 
-All three are optional. Denying any of them leaves the rest of the app fully functional.
+These permissions are optional. Denying one disables or limits only its related integration.
 
 ---
 
 ## Privacy
 
-- **Clipboard history** is held in RAM only. Nothing is written to disk, no network calls are made, no telemetry exists. Content is lost on quit by design.
+- **Clipboard history** is held in RAM only. Its content is lost on quit by design.
 - **File shelf** stores security-scoped bookmark URLs — pointers to files you already own — not copies of file content.
 - **Calendar and reminders** data is read from EventKit on-device. It is never transmitted anywhere.
 - **Media metadata** (track title, artist, artwork) is received from the local MediaRemote subsystem. It stays local.
-- There is no analytics, no crash reporting, no network activity of any kind.
+- **Lyrics** are prefetched from LRCLIB for playing tracks so they are ready when opened, and are cached locally by the lyrics provider.
+- There is no analytics or crash reporting included in the app.
 
 ---
 
@@ -143,12 +156,14 @@ All three are optional. Denying any of them leaves the rest of the app fully fun
 
 ## Acknowledgements
 
+- **[DynamicNotch](https://github.com/jackson-storm/DynamicNotch)** by Evgeniy Petrukovich and contributors (GPL-3.0) — adapted source and behavior for the activity model/engine, notch shape and animation work, activity views, lock observation, artwork/equalizer handling, and lyrics components. NotchApp is distributed under GPL-3.0 accordingly.
+- **[Atoll](https://github.com/Ebullioscopic/Atoll)** by Ebullioscopic and contributors (GPL-3.0) — source of adapted lock-screen/panel presentation patterns and Dynamic Island layout behavior.
 - **[NotchDrop](https://github.com/Lakr233/NotchDrop)** by Lakr233 (MIT) — inspiration for the notch-panel shell and file shelf approach. NotchApp is an independent reimplementation; no source is copied.
 - **mediaremote-adapter** by Jonas van den Berg and contributors (BSD 3-Clause) — the bundled Perl adapter and `MediaRemoteAdapter.framework` that bridge the macOS 15.4+ MediaRemote entitlement lockdown. See `Vendor/MediaRemoteAdapter/MediaRemoteAdapter-LICENSE.txt`.
-- **[boringNotch](https://github.com/TheBoredTeam/boring.notch)** by TheBoredTeam (GPL-2.0) — referenced for media integration approach. Not copied, not linked; GPL does not propagate to NotchApp.
+- **[boringNotch](https://github.com/TheBoredTeam/boring.notch)** by TheBoredTeam (GPL-3.0) — referenced for media integration approach; it is also part of the GPL-3.0 lineage documented by Atoll.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GNU General Public License v3.0 — see [LICENSE](LICENSE).

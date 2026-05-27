@@ -221,11 +221,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .store(in: &cancellables)
         nowPlayingBridge.start()
 
-        // Register / unregister the shell as a lyrics consumer based on
-        // the toggle. Centralizing here (instead of in NowPlayingView)
-        // means the consumer state survives across SwiftUI re-renders
-        // and isn't tied to view appearance — lyrics keep loading as
-        // long as the user has the toggle on, even if they switch tabs.
+        // Forward shell visibility state through the legacy consumer API.
+        // LyricsService currently prefetches independently of consumers,
+        // but keeping this wiring avoids coupling the view to that policy.
         NotchLyricsToggleState.shared.$enabled
             .removeDuplicates()
             .receive(on: DispatchQueue.main)

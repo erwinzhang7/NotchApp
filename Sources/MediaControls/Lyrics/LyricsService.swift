@@ -31,9 +31,8 @@ final class LyricsService: ObservableObject {
         self.provider = provider ?? LRCLIBLyricsProvider()
     }
 
-    /// Spin up subscriptions on the now-playing state. Fetches stay
-    /// gated on `activeConsumers` — start() alone never triggers a
-    /// network call.
+    /// Spin up subscriptions on the now-playing state. Track identity
+    /// changes trigger prefetches whether or not lyrics are currently shown.
     func start() {
         guard cancellables.isEmpty else { return }
         NSLog("[Lyrics] service.start()")
