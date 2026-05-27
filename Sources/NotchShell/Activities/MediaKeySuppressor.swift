@@ -52,8 +52,19 @@ final class MediaKeySuppressor {
 
     func start() {
         Self.active = self
+        let trusted = AXIsProcessTrusted()
+        NSLog("[MediaKeys] start() — AX trusted=%@", trusted ? "Y" : "N")
         if installTap() { return }
-        if !promptedForAccess { promptForAccessibility() }
+        // If we're already trusted but installTap still failed, prompting
+        // is useless (the user already granted us — showing the system
+        // dialog again would just spam them). Poll instead and surface the
+        // failure mode in logs.
+        if trusted {
+            NSLog("[MediaKeys] trusted but tap install failed — polling without re-prompt")
+        } else {
+            NSLog("[MediaKeys] not trusted — prompting once + polling")
+            if !promptedForAccess { promptForAccessibility() }
+        }
         startTrustPolling()
     }
 
@@ -114,11 +125,17 @@ final class MediaKeySuppressor {
 
     private func promptForAccessibility() {
         promptedForAccess = true
+        NSLog("[MediaKeys] showing Accessibility prompt + system permission dialog")
 
         // Triggers the system prompt and registers the app under Accessibility.
         let promptKey = "AXTrustedCheckOptionPrompt" as CFString
         let options: CFDictionary = [promptKey: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
+
+        // LSUIElement apps don't have a Dock icon, so a plain modal alert
+        // can land behind other windows. Force-activate first so the user
+        // actually sees the dialog.
+        NSApp.activate(ignoringOtherApps: true)
 
         let alert = NSAlert()
         alert.messageText = "NotchApp needs Accessibility access"
@@ -143,9 +160,12 @@ final class MediaKeySuppressor {
 
     private func startTrustPolling() {
         guard trustPollTimer == nil else { return }
+        NSLog("[MediaKeys] starting trust poll (every 2s)")
         let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                let trusted = AXIsProcessTrusted()
+                NSLog("[MediaKeys] poll tick — AX trusted=%@", trusted ? "Y" : "N")
                 if self.installTap() {
                     self.trustPollTimer?.invalidate()
                     self.trustPollTimer = nil

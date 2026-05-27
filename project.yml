@@ -12,8 +12,8 @@ settings:
     MARKETING_VERSION: "1.4.0"
     CURRENT_PROJECT_VERSION: "6"
     DEVELOPMENT_TEAM: ""
-    CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "NotchApp Dev"
     ENABLE_HARDENED_RUNTIME: YES
 
 targets:
@@ -76,6 +76,17 @@ targets:
       path: Resources/NotchApp.entitlements
       properties:
         com.apple.security.app-sandbox: false
+        # Required when signed with our self-signed "NotchApp Dev" identity
+        # under hardened runtime: Xcode's debug dylibs (libMainThreadChecker,
+        # libBacktraceRecording, etc.) are Apple-signed, and without this
+        # entitlement dyld refuses to load them — process dies at launch
+        # with `dyld4::halt → abort_with_payload`. Safe for release too;
+        # we don't load arbitrary plugins.
+        com.apple.security.cs.disable-library-validation: true
+        # Lets the Xcode debugger attach to the running process. Auto-added
+        # by Xcode for Debug builds when using Apple-issued identities, but
+        # not for self-signed — declare it explicitly.
+        com.apple.security.get-task-allow: true
         # Pair to NSAppleEventsUsageDescription above. Required by hardened
         # runtime to send Apple events to other apps. Non-sandbox variant —
         # one switch covers all targets; no per-app temporary-exception.
