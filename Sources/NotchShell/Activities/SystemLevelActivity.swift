@@ -1,7 +1,9 @@
 import SwiftUI
 
-private let systemLevelLeadingWingWidth: CGFloat = 112
-private let systemLevelTrailingWingWidth: CGFloat = 64
+/// Symmetric wing width — same on both sides so the camera dead-zone
+/// in the middle stays centered on the physical notch. Sized for the
+/// longer leading label this family uses ("Brightness" + icon).
+private let systemLevelWingWidth: CGFloat = 112
 
 struct BrightnessActivity: NotchActivity {
     let id: String = "activity.brightness"
@@ -11,7 +13,7 @@ struct BrightnessActivity: NotchActivity {
 
     func size(base: CGSize) -> CGSize {
         CGSize(
-            width: base.width + systemLevelLeadingWingWidth + systemLevelTrailingWingWidth,
+            width: base.width + systemLevelWingWidth * 2,
             height: base.height
         )
     }
@@ -20,8 +22,7 @@ struct BrightnessActivity: NotchActivity {
     func makeView() -> AnyView {
         AnyView(
             ActivityRibbon(
-                leadingWingWidth: systemLevelLeadingWingWidth,
-                trailingWingWidth: systemLevelTrailingWingWidth,
+                wingWidth: systemLevelWingWidth,
                 leadingSymbol: "sun.max.fill",
                 leadingTint: .yellow,
                 title: "Brightness",
@@ -47,7 +48,7 @@ struct VolumeActivity: NotchActivity {
 
     func size(base: CGSize) -> CGSize {
         CGSize(
-            width: base.width + systemLevelLeadingWingWidth + systemLevelTrailingWingWidth,
+            width: base.width + systemLevelWingWidth * 2,
             height: base.height
         )
     }
@@ -56,8 +57,7 @@ struct VolumeActivity: NotchActivity {
     func makeView() -> AnyView {
         AnyView(
             ActivityRibbon(
-                leadingWingWidth: systemLevelLeadingWingWidth,
-                trailingWingWidth: systemLevelTrailingWingWidth,
+                wingWidth: systemLevelWingWidth,
                 leadingSymbol: symbol,
                 leadingTint: .white,
                 title: isMuted ? "Muted" : "Volume",

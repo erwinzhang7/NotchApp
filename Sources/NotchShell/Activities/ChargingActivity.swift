@@ -9,8 +9,10 @@ import SwiftUI
 /// trailing carries just a 3- or 4-char percentage. Sized so "Low Battery"
 /// (~74pt at 12pt semibold) clears the camera with ~16pt of padding +
 /// curve clearance, and "100%" sits comfortably in the trailing wing.
-private let powerLeadingWingWidth: CGFloat = 130
-private let powerTrailingWingWidth: CGFloat = 70
+/// Symmetric wing width (applied to both sides so the dead-zone stays
+/// centered on the notch). Sized for the longest leading label this
+/// family uses ("Plugged In" / "Low Battery" / "Charged" + icon).
+private let powerWingWidth: CGFloat = 130
 
 struct ChargingActivity: NotchActivity {
     let id: String = "activity.power.charging"
@@ -21,7 +23,7 @@ struct ChargingActivity: NotchActivity {
 
     func size(base: CGSize) -> CGSize {
         CGSize(
-            width: base.width + powerLeadingWingWidth + powerTrailingWingWidth,
+            width: base.width + powerWingWidth * 2,
             height: base.height
         )
     }
@@ -43,7 +45,7 @@ struct LowPowerActivity: NotchActivity {
 
     func size(base: CGSize) -> CGSize {
         CGSize(
-            width: base.width + powerLeadingWingWidth + powerTrailingWingWidth,
+            width: base.width + powerWingWidth * 2,
             height: base.height
         )
     }
@@ -62,7 +64,7 @@ struct FullPowerActivity: NotchActivity {
 
     func size(base: CGSize) -> CGSize {
         CGSize(
-            width: base.width + powerLeadingWingWidth + powerTrailingWingWidth,
+            width: base.width + powerWingWidth * 2,
             height: base.height
         )
     }
@@ -81,8 +83,7 @@ private struct ChargingActivityView: View {
 
     var body: some View {
         ActivityRibbon(
-            leadingWingWidth: powerLeadingWingWidth,
-            trailingWingWidth: powerTrailingWingWidth,
+            wingWidth: powerWingWidth,
             leadingSymbol: "bolt.fill",
             leadingTint: .green,
             title: isCharging ? "Charging" : "Plugged In",
@@ -96,8 +97,7 @@ private struct LowPowerActivityView: View {
 
     var body: some View {
         ActivityRibbon(
-            leadingWingWidth: powerLeadingWingWidth,
-            trailingWingWidth: powerTrailingWingWidth,
+            wingWidth: powerWingWidth,
             leadingSymbol: "battery.25percent",
             leadingTint: .yellow,
             title: "Low Battery",
@@ -111,8 +111,7 @@ private struct FullPowerActivityView: View {
 
     var body: some View {
         ActivityRibbon(
-            leadingWingWidth: powerLeadingWingWidth,
-            trailingWingWidth: powerTrailingWingWidth,
+            wingWidth: powerWingWidth,
             leadingSymbol: "battery.100percent",
             leadingTint: .green,
             title: "Charged",
@@ -135,8 +134,14 @@ private struct FullPowerActivityView: View {
 struct ActivityRibbon: View {
     @Environment(\.physicalNotchWidth) private var physicalNotchWidth
 
-    let leadingWingWidth: CGFloat
-    let trailingWingWidth: CGFloat
+    /// **Symmetric** wing width — applied identically to both sides so the
+    /// camera dead-zone in the middle stays exactly centered on the
+    /// physical notch. Passing different leading/trailing widths used
+    /// to shift the dead-zone off the camera by `(leading-trailing)/2`,
+    /// which made long leading-wing content (e.g. "Brightness") visibly
+    /// poke into the camera area. Activities pick this as the *larger*
+    /// of the two sides they actually need.
+    let wingWidth: CGFloat
     let leadingSymbol: String
     let leadingTint: Color
     let title: String
@@ -180,7 +185,7 @@ struct ActivityRibbon: View {
                     .layoutPriority(0)
             }
             .padding(.leading, edgePadding)
-            .frame(width: leadingWingWidth, alignment: .leading)
+            .frame(width: wingWidth, alignment: .leading)
             .clipped()
 
             // Camera dead-zone — exact notch width, transparent so the
@@ -197,7 +202,7 @@ struct ActivityRibbon: View {
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .padding(.trailing, edgePadding)
-                .frame(width: trailingWingWidth, alignment: .trailing)
+                .frame(width: wingWidth, alignment: .trailing)
         }
         .frame(maxHeight: .infinity)
     }

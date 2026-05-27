@@ -5,11 +5,11 @@ import SwiftUI
 /// but with no settings: hardcoded compact layout, no battery readout
 /// (would require IORegistry polling we don't ship yet).
 
-/// Asymmetric wings: leading carries the device name (highly variable
-/// length — "AirPods Pro (2nd generation)" is 160pt+ at 12pt medium),
-/// trailing carries the static "Connected" label.
-private let bluetoothLeadingWingWidth: CGFloat = 170
-private let bluetoothTrailingWingWidth: CGFloat = 90
+/// Symmetric wing width — same on both sides so the camera dead-zone in
+/// the middle stays centered on the physical notch. Sized for the
+/// longer leading label this family uses ("AirPods Pro (2nd generation)"
+/// truncates to the wing width).
+private let bluetoothWingWidth: CGFloat = 170
 
 struct BluetoothConnectedActivity: NotchActivity {
     let id: String = "activity.bluetooth.connected"
@@ -19,7 +19,7 @@ struct BluetoothConnectedActivity: NotchActivity {
 
     func size(base: CGSize) -> CGSize {
         CGSize(
-            width: base.width + bluetoothLeadingWingWidth + bluetoothTrailingWingWidth,
+            width: base.width + bluetoothWingWidth * 2,
             height: base.height
         )
     }
@@ -35,8 +35,7 @@ private struct BluetoothConnectedActivityView: View {
 
     var body: some View {
         ActivityRibbon(
-            leadingWingWidth: bluetoothLeadingWingWidth,
-            trailingWingWidth: bluetoothTrailingWingWidth,
+            wingWidth: bluetoothWingWidth,
             leadingSymbol: device.type.sfSymbol,
             leadingTint: .white,
             title: device.name,
