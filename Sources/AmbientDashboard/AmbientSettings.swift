@@ -65,7 +65,7 @@ final class AmbientSettings: ObservableObject {
             Keys.showCalendar:                       true,
             Keys.showReminders:                      true,
             Keys.showInMenuBar:                      true,
-            Keys.lockScreenWidgetEnabled:            false,
+            Keys.lockScreenWidgetEnabled:            true,
             Keys.lockScreenWidgetIdleTimeoutSeconds: 180,
             Keys.lockScreenWidgetVerticalOffset:     0,
             Keys.showLockScreenLyrics:               false,

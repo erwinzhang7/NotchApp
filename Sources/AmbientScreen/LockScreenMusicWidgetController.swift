@@ -85,10 +85,18 @@ final class LockScreenMusicWidgetController {
     // MARK: - Lifecycle
 
     func start() {
-        applyEnabled()
+        // Lock-notch indicator + the underlying DistributedNotificationCenter
+        // observers are unconditional now. Lock/unlock is a core feature; the
+        // music card / backdrop are the only opt-in pieces and they get
+        // built / torn down by `applyMusicEnabled()`.
+        buildLockNotchPanelIfNeeded()
+        installCoreObservers()
+        refreshVisibility()
+
+        applyMusicEnabled()
         ambient.$lockScreenWidgetEnabled
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.applyEnabled() }
+            .sink { [weak self] _ in self?.applyMusicEnabled() }
             .store(in: &cancellables)
         ambient.$lockScreenWidgetIdleTimeoutSeconds
             .receive(on: DispatchQueue.main)
@@ -119,18 +127,29 @@ final class LockScreenMusicWidgetController {
         teardown()
     }
 
-    /// Build or tear down all observers + window based on the master toggle.
-    private func applyEnabled() {
+    /// Build or tear down the music card + backdrop based on the user toggle.
+    /// Lock-notch indicator stays installed regardless — it's a core feature
+    /// (lock/unlock UI), not part of the music card opt-in.
+    private func applyMusicEnabled() {
         if ambient.lockScreenWidgetEnabled {
-            buildIfNeeded()
-            installObservers()
+            buildMusicPanelsIfNeeded()
+            installMusicObservers()
             refreshVisibility()
         } else {
-            teardown()
+            teardownMusicOnly()
         }
     }
 
-    private func buildIfNeeded() {
+    private func buildLockNotchPanelIfNeeded() {
+        if lockNotchPanel == nil {
+            let lp = registerAndAssign(makeLockNotchPanel())
+            lockNotchPanel = lp
+            lockNotchFullFrame = lp.frame
+        }
+        logPanelConfiguration()
+    }
+
+    private func buildMusicPanelsIfNeeded() {
         // Backdrop FIRST so it lands at the bottom of the SkyLight
         // space's z-order; the card stacks on top.
         if backdropPanel == nil {
@@ -138,11 +157,6 @@ final class LockScreenMusicWidgetController {
         }
         if panel == nil {
             panel = registerAndAssign(makePanel())
-        }
-        if lockNotchPanel == nil {
-            let lp = registerAndAssign(makeLockNotchPanel())
-            lockNotchPanel = lp
-            lockNotchFullFrame = lp.frame
         }
         logPanelConfiguration()
     }
@@ -224,7 +238,10 @@ final class LockScreenMusicWidgetController {
         }
     }
 
-    private func installObservers() {
+    /// Always-on observers: lock/unlock + screen-config. Drive the
+    /// lock-notch indicator and any other piece that has to react to
+    /// lock state regardless of the music-card toggle.
+    private func installCoreObservers() {
         lockObserver.onLocked = { [weak self] in
             // Safety: force the artwork back to its compact state on
             // every lock so the full-screen backdrop never starts the
@@ -255,17 +272,10 @@ final class LockScreenMusicWidgetController {
             .sink { [weak self] _ in self?.refreshVisibility() }
             .store(in: &cancellables)
 
-        idleMonitor.threshold = TimeInterval(ambient.lockScreenWidgetIdleTimeoutSeconds)
-        idleMonitor.onIdle = { [weak self] in self?.idle = true; self?.refreshVisibility() }
-        idleMonitor.onActive = { [weak self] in self?.idle = false; self?.refreshVisibility() }
-        idleMonitor.start()
-
-        // Keyboard activity poll so the backdrop knows when to fade
-        // out for the lock-screen password field.
-        startKeyboardPoll()
-
         // Re-center on display config changes (resolution shift, monitor
         // unplugged, etc.) so the widget doesn't end up off-screen.
+        // `recenter()` is nil-safe and handles the music-card panel only;
+        // the lock-notch panel doesn't move with config changes today.
         if screenChangeObserver == nil {
             screenChangeObserver = NotificationCenter.default.addObserver(
                 forName: NSApplication.didChangeScreenParametersNotification,
@@ -277,6 +287,21 @@ final class LockScreenMusicWidgetController {
         }
     }
 
+    /// Music-card-only observers: idle detection and the keyboard-active
+    /// poll. Installed/torn down with the toggle.
+    private func installMusicObservers() {
+        idleMonitor.threshold = TimeInterval(ambient.lockScreenWidgetIdleTimeoutSeconds)
+        idleMonitor.onIdle = { [weak self] in self?.idle = true; self?.refreshVisibility() }
+        idleMonitor.onActive = { [weak self] in self?.idle = false; self?.refreshVisibility() }
+        idleMonitor.start()
+
+        // Keyboard activity poll so the backdrop knows when to fade
+        // out for the lock-screen password field.
+        startKeyboardPoll()
+    }
+
+    /// Full teardown — used by `stop()` on app termination. Brings down
+    /// everything including the always-on lock-notch + core observers.
     private func teardown() {
         lockObserver.stop()
         idleMonitor.stop()
@@ -292,6 +317,21 @@ final class LockScreenMusicWidgetController {
             NotificationCenter.default.removeObserver(token)
             screenChangeObserver = nil
         }
+    }
+
+    /// Partial teardown when the music-card toggle flips off. Leaves the
+    /// lock-notch indicator + core observers running.
+    private func teardownMusicOnly() {
+        idleMonitor.stop()
+        stopKeyboardPoll()
+        blurService.stop()
+        panel?.orderOut(nil)
+        panel = nil
+        backdropPanel?.orderOut(nil)
+        backdropPanel = nil
+        // Reset the music-only state flags so the next enable doesn't
+        // inherit a stale "idle" reading from before the toggle.
+        idle = false
     }
 
     /// Reposition the panel using the current settings (vertical offset

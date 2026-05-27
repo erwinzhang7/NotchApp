@@ -3,8 +3,8 @@ import Combine
 import SwiftUI
 
 /// Always-visible Dynamic-Island-style pill that hugs the physical notch.
-/// Hosts the `NotchActivityEngine` so activities (charging, bluetooth
-/// connect, now-playing) appear in the same surface.
+/// Hosts the `NotchActivityEngine` so activities (brightness, volume,
+/// charging, bluetooth connect, now-playing) appear in the same surface.
 ///
 /// Lives in its own NSPanel so it can sit above wallpaper and most windows
 /// at all times without interfering with `NotchWindowController`'s expanded

@@ -17,6 +17,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Lifecycle parallels the pill itself.
     private let powerSource = PowerActivitySource()
     private let bluetoothSource = BluetoothActivitySource()
+    private let brightnessSource = BrightnessActivitySource()
+    private let volumeSource = VolumeActivitySource()
+    /// Hardware-key suppressor: intercepts brightness/volume/mute keys
+    /// before macOS shows its native HUD so the user only sees the
+    /// notch activity. Lazy because it captures the sources above.
+    private lazy var mediaKeySuppressor = MediaKeySuppressor(
+        brightness: brightnessSource,
+        volume: volumeSource
+    )
     private lazy var nowPlayingBridge = NowPlayingActivityBridge(
         nowPlaying: MediaControls.shared.state
     )
@@ -55,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lockScreenWidget.start()
         idleNotchPill.start()
         startActivitySources()
+        mediaKeySuppressor.start()
         installPanicHotkey()
 
         // Install / remove the status-bar item live in response to the
@@ -73,6 +83,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MediaControls.shared.adapter.stop()
         powerSource.stop()
         bluetoothSource.stop()
+        brightnessSource.stop()
+        volumeSource.stop()
+        mediaKeySuppressor.stop()
         nowPlayingBridge.stop()
         idleNotchPill.stop()
         lockScreenWidget.stop()
@@ -154,7 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Activity wiring
 
-    /// Spin up power / bluetooth / now-playing sources and route their
+    /// Spin up temporary and live activity sources and route their
     /// events into the idle pill's engine. Each branch translates the
     /// source's domain event into a NotchActivity and the appropriate
     /// engine call. Subscriptions live for the app's lifetime.
@@ -201,6 +214,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
         bluetoothSource.start()
+
+        brightnessSource.events
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] level in
+                self?.idleNotchPill.engine.showTemporary(
+                    BrightnessActivity(level: level),
+                    duration: Self.temporaryActivityDuration
+                )
+            }
+            .store(in: &cancellables)
+        brightnessSource.start()
+
+        volumeSource.events
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] snapshot in
+                self?.idleNotchPill.engine.showTemporary(
+                    VolumeActivity(level: snapshot.level, isMuted: snapshot.isMuted),
+                    duration: Self.temporaryActivityDuration
+                )
+            }
+            .store(in: &cancellables)
+        volumeSource.start()
 
         nowPlayingBridge.events
             .receive(on: DispatchQueue.main)

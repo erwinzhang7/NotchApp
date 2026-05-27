@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// One displayable activity in the idle notch — charging, bluetooth
-/// connection, now-playing, etc. Lean version of DynamicNotch's
+/// One displayable activity in the idle notch — brightness, volume,
+/// charging, bluetooth connection, now-playing, etc. Lean version of DynamicNotch's
 /// `NotchContentProtocol`: no expand-on-tap, no window links, no stroke
 /// colors. Activities are pure compact ribbons that grow from the base
 /// idle pill size.
@@ -29,10 +29,10 @@ protocol NotchActivity: Sendable {
 }
 
 /// Fixed priorities — small integer ladder. No UserDefaults overrides, no
-/// per-key registries; one source of truth that the three activity sources
-/// reference directly.
+/// per-key registries; one source of truth for compact activity ordering.
 enum NotchActivityPriority {
     static let nowPlaying = 6
+    static let systemLevel = 5
     static let bluetooth = 4
     static let power = 3
 }

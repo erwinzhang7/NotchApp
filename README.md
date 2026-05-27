@@ -23,7 +23,7 @@ Built in Swift + SwiftUI. Runs as a menu-bar agent (no dock icon). macOS 15+.
 
 **File Conversion** — Right-click a shelved image or PDF to convert it. Output formats are capability-tested at launch against the running ImageIO stack — only formats the current macOS build can actually encode appear in the menu, so you can't pick a target that would silently fail.
 
-**Dynamic Island Activities** — An always-visible compact pill displays now-playing while audio is active and temporary ribbons for AC connection, battery thresholds, and Bluetooth audio-device connections.
+**Dynamic Island Activities** — An always-visible compact pill displays now-playing while audio is active and temporary ribbons for brightness, output volume, AC connection, battery thresholds, and Bluetooth audio-device connections.
 
 **Lock Screen Widget** — An optional music card and lock/unlock notch indicator render during lock presentation or configured system idle time. Unlock uses its own lock-indicator animation path rather than the activity engine.
 
@@ -54,7 +54,7 @@ A borderless, non-activating `NSPanel` floating at the status-bar window level, 
 The app has three notch-position presentation paths:
 
 1. The interactive shell expands on hover, click-to-pin, or file drag/drop.
-2. The idle Dynamic Island-style pill hosts activities from three source families: power, Bluetooth audio connections, and now-playing.
+2. The idle Dynamic Island-style pill hosts activities from power, Bluetooth audio connections, now-playing, built-in display brightness, and current output volume.
 3. The optional lock-screen presentation uses a separate panel and observer route for pre-lock, lock, idle, and the post-unlock icon/shrink animation.
 
 ### In-memory privacy model

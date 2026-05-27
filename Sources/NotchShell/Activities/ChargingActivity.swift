@@ -152,18 +152,36 @@ struct ActivityRibbon: View {
             // Leading wing — left-aligned, icon + title flush against
             // the left edge of the pill (with edgePadding so they
             // clear the inward top-corner curve).
+            //
+            // The Text gets `.frame(maxWidth: .infinity, alignment: .leading)`
+            // + `.layoutPriority(0)` and the Image gets `.layoutPriority(1)`.
+            // Without that, SwiftUI gives Text its full natural width
+            // (ignoring the outer 170pt wing frame, which only
+            // *positions* content, not constrains it), so long names
+            // like "Erwin's AirPods Pro (2nd generation)" spilled
+            // right past the wing into the camera dead-zone instead
+            // of truncating. The explicit maxWidth = .infinity tells
+            // Text to accept the remaining space; truncationMode(.tail)
+            // then actually kicks in.
+            // `.clipped()` on the wing is a belt-and-suspenders
+            // visual fence so any pathological overflow still can't
+            // leak past the wing rect into the notch area.
             HStack(spacing: 5) {
                 Image(systemName: leadingSymbol)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(leadingTint)
+                    .layoutPriority(1)
                 Text(title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(0)
             }
             .padding(.leading, edgePadding)
             .frame(width: leadingWingWidth, alignment: .leading)
+            .clipped()
 
             // Camera dead-zone — exact notch width, transparent so the
             // black pill behind shows through (and the camera lens
