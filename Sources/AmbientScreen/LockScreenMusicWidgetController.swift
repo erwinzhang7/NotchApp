@@ -394,19 +394,18 @@ final class LockScreenMusicWidgetController {
         // Treating both as "showing lock presentation" eliminates the
         // blank flash that used to appear right at lock time.
         //
-        // Caffeinate gate: when any IOKit assertion is preventing
-        // idle sleep (caffeinate -d / -i / -u, or anything else
-        // declaring the user active), suppress the widget entirely.
-        // The user explicitly does NOT want the widget overlay
-        // appearing on a display that's still lit because something
-        // is keeping it that way — even if the screen has security-
-        // locked on schedule. IdleMonitor's tick polls assertions
-        // every 5s, so caffeinate engaging mid-lock propagates via
-        // an `onActive` callback within that window.
+        // Caffeinate gate — applied ONLY to the idle-trigger path. When
+        // an IOKit assertion is preventing idle sleep (caffeinate -d /
+        // -i / -u, video apps declaring the user active, etc.), we
+        // don't want the widget appearing on a screen that's still
+        // fully lit just because our idle timer fired. The lock path,
+        // on the other hand, is explicit user intent — power button,
+        // hot corner, ⌃⌘Q, system idle-lock — and should always
+        // surface the widget regardless of caffeinate, since the
+        // screen is actually going to / is locked at that point.
         let caffeinated = IdleMonitor.hasPreventIdleAssertion()
         let isLockState = locked || lockObserver.isPreparingLock
-        let baseShould = isLockState || idle
-        let shouldShow = baseShould && !caffeinated
+        let shouldShow = isLockState || (idle && !caffeinated)
         NSLog("[Visibility] locked=%@ idle=%@ preparing=%@ caffeinated=%@ -> show=%@ (lockState=%@)",
               locked ? "Y" : "N",
               idle ? "Y" : "N",
