@@ -33,10 +33,10 @@ final class NowPlayingState: ObservableObject {
 
     @Published var isPlaying: Bool = false {
         willSet {
-            // Freeze projection on transition true→false. The adapter
-            // only emits a fresh `elapsed` value when it actually
-            // arrives from MediaRemote, which can be hundreds of ms
-            // after the pause flag flips. Between those two events,
+            // Pause (true → false): freeze projection. The adapter only
+            // emits a fresh `elapsed` value when it actually arrives
+            // from MediaRemote, which can be hundreds of ms after the
+            // pause flag flips. Between those two events,
             // `projectedElapsed` would fall back to the stale `elapsed`
             // field (the last position reported *before* the pause)
             // and the lyrics view would visibly snap backward. By
@@ -44,10 +44,20 @@ final class NowPlayingState: ObservableObject {
             // true and `playbackRate` still reflects the playing rate —
             // and writing it into `elapsed`, the view continues to
             // show the correct paused position immediately.
-            guard isPlaying, !newValue, lastElapsedUpdate != .distantPast else { return }
-            let drift = Date().timeIntervalSince(lastElapsedUpdate) * playbackRate
-            let projected = elapsed + drift
-            elapsed = duration > 0 ? min(projected, duration) : projected
+            //
+            // Resume (false → true): re-anchor `lastElapsedUpdate` to
+            // *now* so that subsequent `projectedElapsed` calls drift
+            // from the paused position only. Without this, drift adds
+            // the entire pause duration on top of the actual elapsed,
+            // and the lyrics jump forward by however long the song
+            // was paused before snapping back when the adapter sends
+            // a fresh elapsed/timestamp pair.
+            guard isPlaying != newValue, lastElapsedUpdate != .distantPast else { return }
+            if isPlaying, !newValue {
+                let drift = Date().timeIntervalSince(lastElapsedUpdate) * playbackRate
+                let projected = elapsed + drift
+                elapsed = duration > 0 ? min(projected, duration) : projected
+            }
             lastElapsedUpdate = Date()
         }
     }

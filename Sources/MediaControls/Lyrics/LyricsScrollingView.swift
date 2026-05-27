@@ -51,7 +51,7 @@ struct LyricsScrollingView: View {
 
         var activeFontSize: CGFloat {
             switch self {
-            case .tall:    return 22
+            case .tall:    return 31
             case .shell:   return 16
             case .compact: return 13
             }
@@ -59,7 +59,7 @@ struct LyricsScrollingView: View {
 
         var inactiveFontSize: CGFloat {
             switch self {
-            case .tall:    return 18
+            case .tall:    return 25
             case .shell:   return 13
             case .compact: return 11
             }
@@ -67,7 +67,7 @@ struct LyricsScrollingView: View {
 
         var lineSpacing: CGFloat {
             switch self {
-            case .tall:    return 14
+            case .tall:    return 20
             case .shell:   return 6
             case .compact: return 3
             }

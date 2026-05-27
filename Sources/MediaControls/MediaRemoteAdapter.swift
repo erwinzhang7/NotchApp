@@ -372,11 +372,25 @@ final class MediaRemoteAdapter {
             }
         } else {
             if let elapsed = payload.elapsedTime {
-                state.elapsed = elapsed
-                if let ts = payload.timestamp, let date = Self.iso8601.date(from: ts) {
-                    state.lastElapsedUpdate = date
-                } else {
-                    state.lastElapsedUpdate = Date()
+                // Pause-time stale-snapshot guard: while paused, audio
+                // isn't moving — so any adapter elapsed that's *behind*
+                // our current state.elapsed is by definition a stale
+                // snapshot (the willSet projection in NowPlayingState
+                // wrote the correct paused position when the pause
+                // flag flipped; Spotify's MediaRemote pause payload
+                // routinely carries a snapshot taken hundreds of ms
+                // earlier). Forward updates while paused are still
+                // applied — those represent a real manual seek the
+                // user did with the player UI.
+                let isPausedBackwardSnapshot = !state.isPlaying
+                    && elapsed < state.elapsed
+                if !isPausedBackwardSnapshot {
+                    state.elapsed = elapsed
+                    if let ts = payload.timestamp, let date = Self.iso8601.date(from: ts) {
+                        state.lastElapsedUpdate = date
+                    } else {
+                        state.lastElapsedUpdate = Date()
+                    }
                 }
             } else if !isValid {
                 state.elapsed = 0
