@@ -18,6 +18,15 @@ final class VolumeActivitySource: ObservableObject {
     private var volumeAddress: AudioObjectPropertyAddress?
     private var previousSnapshot: Snapshot?
 
+    /// Wall-clock time of the last user-initiated volume change
+    /// (MediaKeySuppressor calling `adjust(by:)` or `toggleMute()` from
+    /// a key press). Stream changes outside this window — apps ducking
+    /// for audio, Touch Bar slider, Control Center, AppleScript — are
+    /// applied to `previousSnapshot` silently. Mirrors the brightness
+    /// gating so neither HUD flickers under programmatic nudges.
+    private var lastUserAdjustAt: Date?
+    private let userIntentWindow: TimeInterval = 1.5
+
     nonisolated private static let defaultOutputAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultOutputDevice,
         mScope: kAudioObjectPropertyScopeGlobal,
@@ -161,6 +170,7 @@ final class VolumeActivitySource: ObservableObject {
         guard AudioObjectGetPropertyData(outputDevice, &volumeAddress, 0, nil, &size, &current) == noErr,
               current.isFinite else { return }
         var next = min(max(current + delta, 0), 1)
+        lastUserAdjustAt = Date()
         AudioObjectSetPropertyData(outputDevice, &volumeAddress, 0, nil, size, &next)
 
         if delta != 0, Self.hasProperty(Self.muteAddress, on: outputDevice) {
@@ -184,6 +194,7 @@ final class VolumeActivitySource: ObservableObject {
         var size = UInt32(MemoryLayout<UInt32>.size)
         guard AudioObjectGetPropertyData(outputDevice, &muteAddress, 0, nil, &size, &muted) == noErr else { return }
         var next: UInt32 = muted == 0 ? 1 : 0
+        lastUserAdjustAt = Date()
         AudioObjectSetPropertyData(outputDevice, &muteAddress, 0, nil, size, &next)
     }
 
@@ -216,9 +227,12 @@ final class VolumeActivitySource: ObservableObject {
         )
         guard snapshot != previousSnapshot else { return }
         previousSnapshot = snapshot
-        if emit {
-            events.send(snapshot)
-        }
+        guard emit else { return }
+        // Same user-intent gate as brightness — suppress the activity
+        // for programmatic / slider / app-driven volume changes.
+        let recent = lastUserAdjustAt.map { Date().timeIntervalSince($0) < userIntentWindow } ?? false
+        guard recent else { return }
+        events.send(snapshot)
     }
 
     private static func hasProperty(_ address: AudioObjectPropertyAddress, on device: AudioObjectID) -> Bool {

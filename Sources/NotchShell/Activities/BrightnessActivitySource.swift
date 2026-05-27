@@ -43,6 +43,16 @@ final class BrightnessActivitySource: ObservableObject {
     private var displayID: CGDirectDisplayID?
     private var previousLevel: Int?
 
+    /// Wall-clock time of the last user-initiated brightness change
+    /// (i.e., MediaKeySuppressor calling `adjust(by:)` from a key press).
+    /// Changes that arrive outside this window — ambient-light auto-
+    /// adjustments, Touch Bar slider, Control Center, AppleScript — are
+    /// applied to `previousLevel` silently but don't surface the
+    /// activity ribbon. Keeps the notch quiet during the continuous
+    /// micro-nudges the ambient light sensor produces.
+    private var lastUserAdjustAt: Date?
+    private let userIntentWindow: TimeInterval = 1.5
+
     func start() {
         guard displayID == nil, let builtInDisplayID = Self.builtInDisplayID() else { return }
 
@@ -104,12 +114,15 @@ final class BrightnessActivitySource: ObservableObject {
 
     /// Apply a delta to the built-in display brightness, clamped to [0, 1].
     /// Triggers our own registered callback in turn, which surfaces the
-    /// activity ribbon via the normal `events` path.
+    /// activity ribbon via the normal `events` path. Stamps
+    /// `lastUserAdjustAt` so the callback knows this change is
+    /// user-initiated and worth showing.
     func adjust(by delta: Float) {
         guard let displayID, let getBrightness, let setBrightness else { return }
         var current: Float = 0
         guard getBrightness(displayID, &current) == 0, current.isFinite else { return }
         let next = min(max(current + delta, 0), 1)
+        lastUserAdjustAt = Date()
         _ = setBrightness(displayID, next)
     }
 
@@ -121,9 +134,15 @@ final class BrightnessActivitySource: ObservableObject {
         let level = min(max(Int((brightness * 100).rounded()), 0), 100)
         guard level != previousLevel else { return }
         previousLevel = level
-        if emit {
-            events.send(level)
-        }
+        guard emit else { return }
+        // Suppress the activity for non-user-initiated changes (ambient
+        // light sensor auto-adjust most commonly; also Touch Bar /
+        // Control Center / AppleScript brightness slider moves). The
+        // ribbon would otherwise flicker constantly under varying
+        // lighting conditions.
+        let recent = lastUserAdjustAt.map { Date().timeIntervalSince($0) < userIntentWindow } ?? false
+        guard recent else { return }
+        events.send(level)
     }
 
     private static func builtInDisplayID() -> CGDirectDisplayID? {
