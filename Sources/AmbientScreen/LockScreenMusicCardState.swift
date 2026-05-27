@@ -7,12 +7,20 @@ import Foundation
 /// in and out of view.
 @MainActor
 final class LockScreenMusicCardState: ObservableObject {
-    @Published var isArtworkLifted: Bool = false {
+    private static let liftedDefaultsKey = "lockScreenWidget.isArtworkLifted"
+
+    @Published var isArtworkLifted: Bool {
         didSet {
+            UserDefaults.standard.set(isArtworkLifted, forKey: Self.liftedDefaultsKey)
             NSLog("[Toggle] cardState.isArtworkLifted %@->%@",
                   oldValue ? "Y" : "N",
                   isArtworkLifted ? "Y" : "N")
         }
+    }
+
+    init() {
+        UserDefaults.standard.register(defaults: [Self.liftedDefaultsKey: false])
+        self.isArtworkLifted = UserDefaults.standard.bool(forKey: Self.liftedDefaultsKey)
     }
 
     /// True while the user is actively typing — keystroke happened

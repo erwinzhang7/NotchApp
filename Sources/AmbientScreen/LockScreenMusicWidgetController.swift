@@ -242,20 +242,21 @@ final class LockScreenMusicWidgetController {
     /// lock-notch indicator and any other piece that has to react to
     /// lock state regardless of the music-card toggle.
     private func installCoreObservers() {
+        // Note: `isArtworkLifted` used to be force-reset to false on
+        // every lock/screensaver as a belt-and-suspenders defense
+        // against the backdrop covering the loginwindow password field.
+        // That role is already covered by `keyboardActive` (the backdrop
+        // fades the moment the user starts typing) and by
+        // LockScreenWidgetPanel.canBecomeKey = false. The reset costs
+        // UX — users who explicitly lifted the artwork (for the lyrics
+        // / large now-playing view) want that state to survive the
+        // next lock, not flip back to the compact card every time.
         lockObserver.onLocked = { [weak self] in
-            // Safety: force the artwork back to its compact state on
-            // every lock so the full-screen backdrop never starts the
-            // session opaque. Combined with the LockScreenWidgetPanel
-            // canBecomeKey=false guard, this gives the loginwindow's
-            // password field both visibility and key focus the moment
-            // the lock screen appears.
-            self?.cardState.isArtworkLifted = false
             self?.locked = true
             self?.refreshVisibility()
         }
         lockObserver.onUnlocked = { [weak self] in self?.locked = false; self?.refreshVisibility() }
         lockObserver.onScreensaverStart = { [weak self] in
-            self?.cardState.isArtworkLifted = false
             self?.locked = true
             self?.refreshVisibility()
         }
