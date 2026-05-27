@@ -37,12 +37,13 @@ struct LyricsScrollingView: View {
 
         /// How many lines on each side of the active one stay visible.
         /// Total visible = 2·radius + 1 (active itself + N above + N below).
-        /// Lock-screen (.tall) matches shell on purpose — more lines
-        /// produced visible "ghost text" at the extremes that read as
-        /// a border around the lyrics column.
+        /// Lock-screen (.tall) goes wider — the column has ~490pt of
+        /// vertical room and opacity falloff already dims the edges
+        /// enough that the old "ghost text border" complaint no longer
+        /// surfaces (the per-line blur that caused it has been removed).
         var windowRadius: Int {
             switch self {
-            case .tall:    return 2
+            case .tall:    return 4
             case .shell:   return 2
             case .compact: return 1
             }

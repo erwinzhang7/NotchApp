@@ -180,6 +180,16 @@ struct LockScreenMusicCardView: View {
                 lyrics: lyrics,
                 elapsedTimeProvider: { state.projectedElapsed },
                 style: .tall,
+                onLineTap: { line in
+                    guard let target = line.startTime else { return }
+                    // Pin the displayed elapsed at the tap target so the
+                    // lyrics view (and scrubber) jump immediately, before
+                    // the player catches up. Same pattern as the
+                    // expanded-shell now-playing view.
+                    state.setSeekPin(target: target, bundleId: state.bundleIdentifier)
+                    state.isScrubbing = false
+                    adapter.seek(toSeconds: target)
+                },
                 textColor: lyricsTextColor
             )
         }
