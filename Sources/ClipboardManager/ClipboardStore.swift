@@ -9,6 +9,17 @@ final class ClipboardStore: ObservableObject {
     @Published private(set) var items: [ClipboardItem] = []
     @Published var searchQuery: String = ""
 
+    /// Fires whenever a TEXT item is newly inserted into the store —
+    /// from manual Cmd+C, auto-copy-on-selection, or any other path
+    /// that lands in `add()`. AppDelegate subscribes to drive the
+    /// "Copied N characters" notch banner. Doesn't fire for images /
+    /// file copies (banner is text-only) or for dedup-suppressed adds.
+    struct TextCopy: Equatable {
+        let characterCount: Int
+        let lineCount: Int
+    }
+    let textCopied = PassthroughSubject<TextCopy, Never>()
+
     /// Pasteboard.changeCount of the last write *we* performed (paste-on-select).
     /// The monitor uses this to suppress re-capturing our own re-copies.
     private(set) var lastInternalChangeCount: Int = -1
@@ -54,6 +65,10 @@ final class ClipboardStore: ObservableObject {
         // Dedup consecutive identical captures only (per spec).
         if let head = items.first, head.fingerprint == item.fingerprint { return false }
         items.insert(item, at: 0)
+        if case .text(let s) = item.kind {
+            let lines = s.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
+            textCopied.send(TextCopy(characterCount: s.count, lineCount: max(1, lines)))
+        }
         return true
     }
 

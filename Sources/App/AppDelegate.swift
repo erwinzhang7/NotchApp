@@ -248,7 +248,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (consecutive-dedup miss), so we don't need to re-check here.
         // Skip while the lock screen owns the display — the idle pill
         // is hidden in that state.
-        ClipboardManager.shared.selectionCopiedEvents
+        // Banner fires for any text added to the clipboard store —
+        // manual Cmd+C, auto-copy-on-selection, anything that lands as
+        // a text item. Single source of truth; avoids the prior race
+        // where the banner only fired via the SelectionMonitor path
+        // and missed manual copies.
+        ClipboardManager.shared.store.textCopied
             .receive(on: DispatchQueue.main)
             .sink { [weak self] copied in
                 guard let self else { return }

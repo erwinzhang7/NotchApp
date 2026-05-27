@@ -18,16 +18,6 @@ enum ClipboardManager {
         let monitor: ClipboardMonitor
         let selectionMonitor: SelectionMonitor
 
-        struct SelectionCopied: Equatable {
-            let characterCount: Int
-            let lineCount: Int
-        }
-        /// Emitted whenever a selection was just captured AND actually
-        /// inserted (i.e., the consecutive-dedup didn't suppress it).
-        /// AppDelegate subscribes to drive the "Copied N characters" /
-        /// "Copied N lines" notch banner.
-        let selectionCopiedEvents = PassthroughSubject<SelectionCopied, Never>()
-
         private var settingsCancellable: AnyCancellable?
         private var selectionCancellable: AnyCancellable?
 
@@ -44,7 +34,9 @@ enum ClipboardManager {
             // Translate each captured selection into a clipboard write.
             // The store's fingerprint dedup decides whether it's actually
             // new; if so, mirror to NSPasteboard so the user can paste it
-            // anywhere, and publish the count for the notch banner.
+            // anywhere. The notch banner is driven by `store.textCopied`
+            // (fires for ANY text that lands in the store, so manual Cmd+C
+            // copies trigger it too), not from here.
             self.selectionCancellable = selectionMonitor.events
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] captured in
@@ -57,15 +49,6 @@ enum ClipboardManager {
                         let inserted = self.store.add(item)
                         guard inserted else { return }
                         self.store.copyToPasteboard(item)
-                        let lineCount = captured.text
-                            .split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
-                            .count
-                        self.selectionCopiedEvents.send(
-                            SelectionCopied(
-                                characterCount: captured.text.count,
-                                lineCount: max(1, lineCount)
-                            )
-                        )
                     }
                 }
 
