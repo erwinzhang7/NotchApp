@@ -270,6 +270,11 @@ final class NotchWindowController: NSObject {
             .store(in: &cancellables)
     }
 
+    /// Current collapsed hot-zone rect in screen coordinates. Tracks the
+    /// activity-extended pill size; used by `DragDetector` to pre-expand
+    /// the panel when a global drag enters the notch region.
+    var currentCollapsedFrame: CGRect { collapsedPanelFrame }
+
     private func refreshCollapsedFrame() {
         guard let placement = NotchGeometry.placement(expandedSize: layoutModel.expandedSize) else { return }
         collapsedPanelFrame = pillFrame(for: placement)

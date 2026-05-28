@@ -9,6 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// fullscreen videos (YouTube / Netflix / QuickTime) instead of
     /// drawing on top of them. Shared across observers that need this.
     private let fullscreenObserver = FullscreenSpaceObserver()
+    /// Global drag monitor: pre-expands the notch when a drag from
+    /// another app crosses the notch hot region, before SwiftUI's
+    /// `.onDrop` would fire. Drives `NotchState.isDragHinted`.
+    private let dragDetector = DragDetector()
     /// Always-visible Dynamic-Island-style pill at the physical notch.
     /// Hides when the shell expands, the system lock screen owns the
     /// display, or the display is in a macOS-fullscreen space.
@@ -74,6 +78,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         lockScreenWidget.start()
         fullscreenObserver.start()
         idleNotchPill.start()
+
+        // Pre-window drag greeting: when a global drag with valid shelf
+        // content enters the notch hot region, push isDragHinted=true so
+        // the panel expands before the cursor reaches the small pill.
+        // Cleared on exit / mouse-up; SwiftUI's onDrop takes over once the
+        // drag actually crosses into the (now-expanded) panel.
+        dragDetector.notchRegion = { [weak self] in
+            self?.notchController.currentCollapsedFrame ?? .zero
+        }
+        dragDetector.onEnter = { [weak self] in
+            self?.notchController.state.isDragHinted = true
+        }
+        dragDetector.onExit = { [weak self] in
+            self?.notchController.state.isDragHinted = false
+        }
+        dragDetector.start()
         // Hot-zone tracking: shell hover/drag detection uses the idle pill's
         // current visible size, so widening activities (NowPlaying etc.)
         // grow the interactive area to match.
@@ -104,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mediaKeySuppressor.stop()
         copyBanner.stop()
         nowPlayingBridge.stop()
+        dragDetector.stop()
         idleNotchPill.stop()
         fullscreenObserver.stop()
         lockScreenWidget.stop()

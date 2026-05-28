@@ -9,6 +9,7 @@ final class NotchState: ObservableObject {
     @Published var isHovered: Bool = false
     @Published var isPinned: Bool = false
     @Published var isDragTargeted: Bool = false
+    @Published var isDragHinted: Bool = false
     @Published private(set) var isHeldOpen: Bool = false
 
     /// Currently selected tab. Mirrored from NotchShellView's @AppStorage so
@@ -17,8 +18,10 @@ final class NotchState: ObservableObject {
     @Published var selectedTab: NotchTab = NotchTab(rawValue: UserDefaults.standard.string(forKey: "notch.selectedTab") ?? "") ?? .ambient
 
     /// The shell is expanded if anything is keeping it open: hover, explicit pin, the
-    /// post-paste hold, or an active drag-and-drop targeting the panel.
-    var isExpanded: Bool { isHovered || isPinned || isHeldOpen || isDragTargeted }
+    /// post-paste hold, an active drag-and-drop targeting the panel, or a global
+    /// drag-hint from the pre-window DragDetector (cursor with valid drag content
+    /// has entered the notch hot region, even before SwiftUI's `.onDrop` fires).
+    var isExpanded: Bool { isHovered || isPinned || isHeldOpen || isDragTargeted || isDragHinted }
 
     // Open-intent delay: cursor must dwell on the notch this long before the panel
     // expands. Stops quick swipes past the notch from flashing the panel open.
