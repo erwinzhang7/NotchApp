@@ -42,6 +42,12 @@ final class NotchWindowController: NSObject {
     private var globalClickMonitor: Any?
     private var mouseMovedMonitor: EventMonitor?
     private var cancellables = Set<AnyCancellable>()
+    /// Current visible size of the idle pill (base + any active activity
+    /// extension). Drives the collapsed hover zone so the hot rect matches
+    /// the rendered pill exactly — including the wider footprint when an
+    /// activity like NowPlaying is on screen. Updated from the activity
+    /// engine after `bindActivityEngine`.
+    private var currentVisibleSize: CGSize = .zero
 
     /// Compact music-view height inside the dashboard. Must stay in sync
     /// with AmbientDashboardView.musicHeight.
@@ -228,16 +234,45 @@ final class NotchWindowController: NSObject {
 
     /// Collapsed pill footprint in screen coordinates: just big enough to cover
     /// the visible pill plus hover slop, top-aligned with the expanded frame.
+    /// When an activity widens the idle pill (e.g. NowPlaying), the hot zone
+    /// tracks that wider footprint so hover/drag-to-reveal land on the entire
+    /// rendered surface.
     private func pillFrame(for placement: NotchGeometry.Placement) -> CGRect {
         let slop = NotchGeometry.hoverSlop
-        let w = placement.collapsedSize.width + slop * 2
-        let h = placement.collapsedSize.height + slop
+        let visibleWidth = max(placement.collapsedSize.width, currentVisibleSize.width)
+        let visibleHeight = max(placement.collapsedSize.height, currentVisibleSize.height)
+        let w = visibleWidth + slop * 2
+        let h = visibleHeight + slop
         return CGRect(
             x: placement.panelFrame.midX - w / 2,
             y: placement.panelFrame.maxY - h,
             width: w,
             height: h
         )
+    }
+
+    /// Wire the activity engine so the collapsed hot zone follows the
+    /// current visible pill size. Called from AppDelegate after both the
+    /// shell and the idle pill have started. Idempotent — re-binding
+    /// replaces the prior subscription.
+    func bindActivityEngine(_ engine: NotchActivityEngine) {
+        currentVisibleSize = engine.model.size
+        refreshCollapsedFrame()
+        engine.$model
+            .map(\.size)
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] size in
+                guard let self else { return }
+                self.currentVisibleSize = size
+                self.refreshCollapsedFrame()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func refreshCollapsedFrame() {
+        guard let placement = NotchGeometry.placement(expandedSize: layoutModel.expandedSize) else { return }
+        collapsedPanelFrame = pillFrame(for: placement)
     }
 
     /// Compute hover state from cursor position. When collapsed, the hot zone is

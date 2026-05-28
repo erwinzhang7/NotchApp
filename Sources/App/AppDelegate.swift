@@ -69,6 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TokenUsageStore.shared.start()
         lockScreenWidget.start()
         idleNotchPill.start()
+        // Hot-zone tracking: shell hover/drag detection uses the idle pill's
+        // current visible size, so widening activities (NowPlaying etc.)
+        // grow the interactive area to match.
+        notchController.bindActivityEngine(idleNotchPill.engine)
         startActivitySources()
         mediaKeySuppressor.start()
         installPanicHotkey()

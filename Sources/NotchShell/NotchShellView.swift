@@ -134,6 +134,9 @@ struct NotchShellView: View {
         // surface + slop (~528×424), so this drop zone exists whether or not the SwiftUI
         // content is currently in its collapsed pill — that's how a drag toward a
         // collapsed notch triggers expansion in one motion.
+        .onChange(of: state.isDragTargeted) { _, targeted in
+            if targeted { Haptics.tap() }
+        }
         .onDrop(of: [UTType.fileURL], isTargeted: $state.isDragTargeted) { providers in
             selectedTab = .clip
             Task { @MainActor in
@@ -274,9 +277,13 @@ struct ClipTabContent: View {
             if shelfStore.hasItems || isDragTargeted {
                 compactSlot
                     .transition(.opacity.combined(with: .move(edge: .leading)))
+                AirDropTileView(layout: .large)
+                    .padding(.leading, 8)
+                    .transition(.opacity.combined(with: .move(edge: .leading)))
                 Rectangle()
                     .fill(Color.white.opacity(0.12))
                     .frame(width: 1)
+                    .padding(.leading, 8)
                     .transition(.opacity)
             }
             ClipboardHistoryView(

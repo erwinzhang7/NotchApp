@@ -64,27 +64,27 @@ struct FileShelfStripView: View {
 
     @ViewBuilder
     private var tiles: some View {
-        if store.items.isEmpty {
-            // No held files yet — show drop hint inline at fixed height so the strip
-            // doesn't jump in size when the first file is added.
-            HStack {
-                Spacer()
+        HStack(spacing: 8) {
+            AirDropTileView(layout: .strip)
+
+            if store.items.isEmpty {
+                // No held files yet — drop hint fills the remaining width so
+                // the strip height stays stable when the first file lands.
                 Text(isTargeted ? "Release to drop" : "Drop files here")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .frame(height: 64)
-        } else {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(store.items) { item in
-                        FileShelfTileView(item: item, store: store)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(store.items) { item in
+                            FileShelfTileView(item: item, store: store)
+                        }
                     }
                 }
             }
-            .frame(height: 64)
         }
+        .frame(height: 64)
     }
 
     private var headerTitle: String {

@@ -65,6 +65,7 @@ final class FileShelfStore: ObservableObject {
     /// Accepts items produced by SwiftUI's `.onDrop`. Loads each provider's file URL on a
     /// background callback, then dispatches the actual add back to the main actor.
     func accept(providers: [NSItemProvider]) async {
+        var landed = 0
         await withTaskGroup(of: URL?.self) { group in
             for provider in providers {
                 group.addTask {
@@ -74,7 +75,11 @@ final class FileShelfStore: ObservableObject {
             for await url in group {
                 guard let url else { continue }
                 await MainActor.run { self.add(url: url) }
+                landed += 1
             }
+        }
+        if landed > 0 {
+            await MainActor.run { Haptics.tap() }
         }
     }
 
