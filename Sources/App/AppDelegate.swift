@@ -102,6 +102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         idleNotchPill.stop()
         lockScreenWidget.stop()
         notchController.hide()
+        // Wipe any temp files we materialized for non-file drags (web URLs,
+        // text snippets, file-promise payloads). Safe — only touches our
+        // own /tmp/NotchApp/Shelf/ subtree.
+        TemporaryShelfStorage.purgeAll()
     }
 
     // MARK: - Status-bar launcher

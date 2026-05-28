@@ -18,4 +18,9 @@ struct FileShelfItem: Identifiable {
     /// back to the filename extension). Nil for files of unknown type.
     /// Used by the conversion context menu to decide what targets to offer.
     let utType: UTType?
+    /// True for files we materialized ourselves from a non-file drag (web
+    /// URL → `.webloc`, selected text → `.txt`, file-promise → temp). The
+    /// shelf treats them like any other file, but the backing temp file is
+    /// removed when the item is removed (and on app exit).
+    let isTemporary: Bool
 }
