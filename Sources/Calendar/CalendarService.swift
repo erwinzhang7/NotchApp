@@ -17,6 +17,12 @@ final class CalendarService: ObservableObject {
     /// as upcoming ones; the view filters down to "remaining today" so users
     /// can still see the recent past at a glance.
     @Published private(set) var todaysEvents: [EKEvent] = []
+    /// Currently-displayed date in the calendar view. Drives `selectedDateEvents`.
+    /// Defaults to today; the wheel picker updates this on user selection.
+    @Published private(set) var selectedDate: Date = Foundation.Calendar.current.startOfDay(for: Date())
+    /// Events on `selectedDate`, fetched on demand when the date changes.
+    /// Same calendar filter as `todaysEvents`.
+    @Published private(set) var selectedDateEvents: [EKEvent] = []
 
     private let store = EKEventStore()
     private let settings: CalendarSettings
@@ -87,22 +93,36 @@ final class CalendarService: ObservableObject {
         guard accessStatus == .fullAccess else {
             availableCalendars = []
             todaysEvents = []
+            selectedDateEvents = []
             return
         }
         availableCalendars = store
             .calendars(for: .event)
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        todaysEvents = events(on: Foundation.Calendar.current.startOfDay(for: Date()))
+        selectedDateEvents = events(on: selectedDate)
+    }
 
+    /// Switch the displayed date and re-query. Cheap on EventKit — same
+    /// `predicateForEvents` path as the today fetch; the store handles its
+    /// own caching for repeat lookups.
+    func setSelectedDate(_ date: Date) {
+        let normalized = Foundation.Calendar.current.startOfDay(for: date)
+        guard normalized != selectedDate else { return }
+        selectedDate = normalized
+        guard accessStatus == .fullAccess else {
+            selectedDateEvents = []
+            return
+        }
+        selectedDateEvents = events(on: normalized)
+    }
+
+    private func events(on day: Date) -> [EKEvent] {
         let cal = Foundation.Calendar.current
-        let start = cal.startOfDay(for: Date())
+        let start = cal.startOfDay(for: day)
         let end = cal.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86400)
-        let calendarsToQuery = filteredCalendars()
-        let predicate = store.predicateForEvents(
-            withStart: start,
-            end: end,
-            calendars: calendarsToQuery
-        )
-        todaysEvents = store.events(matching: predicate)
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: filteredCalendars())
+        return store.events(matching: predicate)
             .sorted { $0.startDate < $1.startDate }
     }
 
