@@ -11,6 +11,18 @@ extension NSItemProvider {
     /// True file dragged from the filesystem (Finder, an editor's project
     /// pane, etc.). Returns nil if the provider doesn't have a fileURL.
     func extractFileURL() async -> URL? {
+        // Prefer the typed object loader. It handles Finder's
+        // security-scoped wrapper correctly and short-circuits the
+        // Data-decoding dance below for the common case.
+        if canLoadObject(ofClass: URL.self) {
+            if let url = await withCheckedContinuation({ (cont: CheckedContinuation<URL?, Never>) in
+                _ = self.loadObject(ofClass: URL.self) { url, _ in
+                    cont.resume(returning: url?.isFileURL == true ? url : nil)
+                }
+            }) {
+                return url
+            }
+        }
         guard hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else { return nil }
         return await loadFileURL(typeIdentifier: UTType.fileURL.identifier)
     }
@@ -75,9 +87,17 @@ extension NSItemProvider {
             loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
                 if let url = item as? URL {
                     cont.resume(returning: url)
-                } else if let data = item as? Data,
-                          let string = String(data: data, encoding: .utf8) {
-                    cont.resume(returning: URL(string: string) ?? URL(fileURLWithPath: string))
+                } else if let data = item as? Data {
+                    // public.file-url payloads can arrive as either the URL's
+                    // dataRepresentation (canonical) or a UTF-8 string. Try
+                    // both, in that order.
+                    if let url = URL(dataRepresentation: data, relativeTo: nil) {
+                        cont.resume(returning: url)
+                    } else if let string = String(data: data, encoding: .utf8) {
+                        cont.resume(returning: URL(string: string) ?? URL(fileURLWithPath: string))
+                    } else {
+                        cont.resume(returning: nil)
+                    }
                 } else if let string = item as? String {
                     cont.resume(returning: URL(string: string) ?? URL(fileURLWithPath: string))
                 } else {
