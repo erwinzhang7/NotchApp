@@ -15,6 +15,10 @@ final class AmbientSettings: ObservableObject {
         didSet { UserDefaults.standard.set(showReminders, forKey: Keys.showReminders) }
     }
 
+    @Published var showTokenUsage: Bool {
+        didSet { UserDefaults.standard.set(showTokenUsage, forKey: Keys.showTokenUsage) }
+    }
+
     /// Whether to install the status-bar (menu bar) item on launch. When
     /// off, the menu bar is uncluttered — settings/history are reached
     /// instead by right-clicking the notch panel itself.
@@ -52,6 +56,7 @@ final class AmbientSettings: ObservableObject {
     private enum Keys {
         static let showCalendar                       = "ambient.showCalendar"
         static let showReminders                      = "ambient.showReminders"
+        static let showTokenUsage                     = "ambient.showTokenUsage"
         static let showInMenuBar                      = "app.showInMenuBar"
         static let lockScreenWidgetEnabled            = "lockScreenWidget.enabled"
         static let lockScreenWidgetIdleTimeoutSeconds = "lockScreenWidget.idleTimeoutSeconds"
@@ -64,6 +69,7 @@ final class AmbientSettings: ObservableObject {
         defaults.register(defaults: [
             Keys.showCalendar:                       true,
             Keys.showReminders:                      true,
+            Keys.showTokenUsage:                     true,
             Keys.showInMenuBar:                      true,
             Keys.lockScreenWidgetEnabled:            true,
             Keys.lockScreenWidgetIdleTimeoutSeconds: 180,
@@ -72,6 +78,7 @@ final class AmbientSettings: ObservableObject {
         ])
         self.showCalendar                       = defaults.bool(forKey: Keys.showCalendar)
         self.showReminders                      = defaults.bool(forKey: Keys.showReminders)
+        self.showTokenUsage                     = defaults.bool(forKey: Keys.showTokenUsage)
         self.showInMenuBar                      = defaults.bool(forKey: Keys.showInMenuBar)
         self.lockScreenWidgetEnabled            = defaults.bool(forKey: Keys.lockScreenWidgetEnabled)
         self.lockScreenWidgetIdleTimeoutSeconds = defaults.integer(forKey: Keys.lockScreenWidgetIdleTimeoutSeconds)

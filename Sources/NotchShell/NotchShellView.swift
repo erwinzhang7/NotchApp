@@ -169,6 +169,11 @@ struct NotchShellView: View {
 
             tabContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if appSettings.showTokenUsage {
+                TokenUsageSummaryRow()
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .preferredColorScheme(.dark)
     }

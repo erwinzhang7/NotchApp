@@ -50,6 +50,7 @@ final class NotchWindowController: NSObject {
     /// when at least one of them is enabled. Sized for a few events plus a
     /// short scrollable reminder list — at-a-glance, not dense.
     private static let ambientBottomHeight: CGFloat = 200
+    private static let tokenUsageHeight: CGFloat = 60
 
     override init() {
         // Bootstrap with sane defaults; show() refreshes from actual screen.
@@ -142,13 +143,13 @@ final class NotchWindowController: NSObject {
             }
             .store(in: &cancellables)
 
-        // Observe ambient toggles. When either flips, recompute the expanded
+        // Observe ambient toggles. When any layout-affecting switch flips, recompute the expanded
         // size, push it into the layout model (SwiftUI reflows the dashboard),
         // and animate the NSPanel frame to match. Same scheduler hop as above
         // so we never run inside a layout pass.
         ambient.$showCalendar
-            .combineLatest(ambient.$showReminders)
-            .removeDuplicates(by: ==)
+            .combineLatest(ambient.$showReminders, ambient.$showTokenUsage)
+            .removeDuplicates { lhs, rhs in lhs.0 == rhs.0 && lhs.1 == rhs.1 && lhs.2 == rhs.2 }
             .dropFirst()  // initial value already applied above via show()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -221,6 +222,7 @@ final class NotchWindowController: NSObject {
         let height = tabStrip
             + Self.ambientMusicHeight
             + (hasBottom ? Self.ambientBottomHeight : 0)
+            + (ambient.showTokenUsage ? Self.tokenUsageHeight : 0)
         return CGSize(width: width, height: height)
     }
 

@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = CalendarManager.shared
         _ = RemindersManager.shared
         _ = ConversionManager.shared
+        TokenUsageStore.shared.start()
         lockScreenWidget.start()
         idleNotchPill.start()
         startActivitySources()
@@ -86,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         ClipboardManager.shared.monitor.stop()
         MediaControls.shared.adapter.stop()
+        TokenUsageStore.shared.stop()
         powerSource.stop()
         bluetoothSource.stop()
         brightnessSource.stop()

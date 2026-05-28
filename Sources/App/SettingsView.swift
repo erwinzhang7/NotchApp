@@ -65,7 +65,8 @@ struct AmbientSettingsView: View {
             Section("Dashboard") {
                 Toggle("Show Calendar", isOn: $ambient.showCalendar)
                 Toggle("Show Reminders", isOn: $ambient.showReminders)
-                Text("Music is always shown. Both off → panel shrinks to music-only.")
+                Toggle("Show Token Usage", isOn: $ambient.showTokenUsage)
+                Text("Music is always shown. Calendar and Reminders off → panel shrinks to music-only; token usage stays controlled separately.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
