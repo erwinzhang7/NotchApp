@@ -35,15 +35,21 @@ final class IdleNotchPillController {
 
     private let shellState: NotchState
     private let lockObserver: LockScreenObserver
+    private let fullscreenObserver: FullscreenSpaceObserver
     let engine = NotchActivityEngine()
     private var panel: IdleNotchPanel?
     private var cancellables = Set<AnyCancellable>()
     private var screenObserver: NSObjectProtocol?
     private var physicalNotchSize: CGSize = .zero
 
-    init(shellState: NotchState, lockObserver: LockScreenObserver) {
+    init(
+        shellState: NotchState,
+        lockObserver: LockScreenObserver,
+        fullscreenObserver: FullscreenSpaceObserver
+    ) {
         self.shellState = shellState
         self.lockObserver = lockObserver
+        self.fullscreenObserver = fullscreenObserver
     }
 
     func start() {
@@ -59,6 +65,12 @@ final class IdleNotchPillController {
             .store(in: &cancellables)
 
         lockObserver.$isLocked
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshVisibility() }
+            .store(in: &cancellables)
+
+        fullscreenObserver.$fullscreenDisplays
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.refreshVisibility() }
@@ -86,8 +98,17 @@ final class IdleNotchPillController {
     }
 
     private var shouldShow: Bool {
-        let expanded = shellState.isExpanded
-        return !expanded && !lockObserver.isLocked
+        if shellState.isExpanded { return false }
+        if lockObserver.isLocked { return false }
+        // Hide on a display whose current space is macOS-fullscreen (e.g.
+        // YouTube / Netflix / Quick Time green-buttoned). Falling back to
+        // the placement screen's UUID keeps us correct when the user has
+        // moved the notch to an external display.
+        if let uuid = NotchGeometry.placement()?.screen.displayUUID,
+           fullscreenObserver.fullscreenDisplays.contains(uuid) {
+            return false
+        }
+        return true
     }
 
     private func refreshVisibility() {

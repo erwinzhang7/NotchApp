@@ -5,13 +5,17 @@ import Combine
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let notchController = NotchWindowController()
     private let lockScreenWidget = LockScreenMusicWidgetController()
+    /// Per-display fullscreen detector so the idle pill hides over
+    /// fullscreen videos (YouTube / Netflix / QuickTime) instead of
+    /// drawing on top of them. Shared across observers that need this.
+    private let fullscreenObserver = FullscreenSpaceObserver()
     /// Always-visible Dynamic-Island-style pill at the physical notch.
-    /// Hides when the shell expands or the system lock screen owns the
-    /// display. Wired with the shell state + the widget's lock observer
-    /// so all three never visually collide.
+    /// Hides when the shell expands, the system lock screen owns the
+    /// display, or the display is in a macOS-fullscreen space.
     private lazy var idleNotchPill = IdleNotchPillController(
         shellState: notchController.state,
-        lockObserver: lockScreenWidget.lockObserver
+        lockObserver: lockScreenWidget.lockObserver,
+        fullscreenObserver: fullscreenObserver
     )
     /// Event sources that feed the idle pill's activity engine.
     /// Lifecycle parallels the pill itself.
@@ -68,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = ConversionManager.shared
         TokenUsageStore.shared.start()
         lockScreenWidget.start()
+        fullscreenObserver.start()
         idleNotchPill.start()
         // Hot-zone tracking: shell hover/drag detection uses the idle pill's
         // current visible size, so widening activities (NowPlaying etc.)
@@ -100,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         copyBanner.stop()
         nowPlayingBridge.stop()
         idleNotchPill.stop()
+        fullscreenObserver.stop()
         lockScreenWidget.stop()
         notchController.hide()
         // Wipe any temp files we materialized for non-file drags (web URLs,
