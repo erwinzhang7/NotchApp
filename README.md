@@ -119,6 +119,68 @@ Right-click `NotchApp.app` in Finder → Open → Open (in the dialog that appea
 xattr -dr com.apple.quarantine /Applications/NotchApp.app
 ```
 
+### Self-sign with your own certificate (recommended for stable permissions)
+
+If you installed a pre-built `.app` from another machine, it was signed with that machine's local certificate, which your Mac doesn't trust. Re-signing with a self-made certificate on your own Mac gives the app a stable identity, so Accessibility / Screen Recording / Automation permissions stick across updates instead of being re-prompted every launch.
+
+**1. Create a self-signed code-signing certificate (one time, ~1 minute):**
+
+Open **Keychain Access** (it's in `/Applications/Utilities/` — Spotlight it). In the menu bar: **Keychain Access → Certificate Assistant → Create a Certificate…**
+
+- **Name:** `NotchApp Self-Signed` (any name works — remember it exactly)
+- **Identity Type:** Self Signed Root
+- **Certificate Type:** Code Signing
+- ✅ Check **Let me override defaults** (this is the step Apple hides — without it the cert is created with the wrong key usage and `codesign` will reject it with "no identity found")
+- Click **Continue** through each panel, accepting defaults:
+  - Serial Number / Validity — leave defaults (default 365 days is fine, bump it higher if you want)
+  - Certificate Information — fill in anything or leave blank
+  - **Key Pair Information** — Algorithm: RSA, Key Size: 2048
+  - **Key Usage Extension** — make sure **Signature** is checked
+  - **Extended Key Usage Extension** — make sure **Code Signing** is checked
+  - Skip the remaining panels with **Continue**
+  - Keychain: **login**
+- Click **Create**, then **Done**.
+
+**2. Trust it for code signing:**
+
+In Keychain Access, switch to the **login** keychain → **My Certificates**. Double-click your new `NotchApp Self-Signed` cert → expand **Trust** → set **Code Signing** to **Always Trust**. Close the window (you'll be prompted for your login password to save the trust setting).
+
+**3. Verify the identity is usable:**
+
+```sh
+security find-identity -v -p codesigning
+```
+
+You should see `NotchApp Self-Signed` in the list. If it doesn't appear, the "override defaults" step was skipped — delete the cert and recreate it.
+
+**4. Sign the app and clear quarantine:**
+
+```sh
+codesign --force --deep --sign "NotchApp Self-Signed" /Applications/NotchApp.app
+xattr -dr com.apple.quarantine /Applications/NotchApp.app
+```
+
+Verify it took:
+
+```sh
+codesign -dv /Applications/NotchApp.app
+```
+
+The `Authority=` line should show your cert name.
+
+**5. First launch (macOS 15 Sequoia changed this):**
+
+On macOS 15, Apple removed the right-click → Open shortcut for unsigned/self-signed apps. The new flow:
+
+1. Double-click `NotchApp.app` — macOS will block it with *"not opened because Apple could not verify…"*. Click **Done** (do NOT click Move to Trash).
+2. Open **System Settings → Privacy & Security**, scroll to the bottom.
+3. You'll see *"NotchApp was blocked to protect your Mac"* — click **Open Anyway**.
+4. Authenticate, then in the next dialog click **Open Anyway** again.
+
+After this first approval, launches are normal.
+
+**Re-signing after an update:** if you replace the `.app` with a new build later, re-run the `codesign` + `xattr` commands from step 4. Use the same certificate name and your granted Accessibility / Screen Recording / Automation permissions will persist instead of being wiped.
+
 ### Permission prompts
 
 NotchApp may request the following permissions as the related feature first becomes active:
