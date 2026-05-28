@@ -16,6 +16,11 @@ settings:
     CODE_SIGN_IDENTITY: "NotchApp Dev"
     ENABLE_HARDENED_RUNTIME: YES
 
+packages:
+  KeyboardShortcuts:
+    url: https://github.com/sindresorhus/KeyboardShortcuts
+    from: 2.2.0
+
 targets:
   NotchApp:
     type: application
@@ -46,6 +51,7 @@ targets:
         embed: true
         link: false
         codeSign: true
+      - package: KeyboardShortcuts
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.erwinzhang.NotchApp

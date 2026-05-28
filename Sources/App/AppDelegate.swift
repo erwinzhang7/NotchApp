@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import KeyboardShortcuts
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -50,18 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var settingsWindow = SettingsWindowController()
     private var statusItem: NSStatusItem?
     private var cancellables = Set<AnyCancellable>()
-    /// Global + local NSEvent monitor tokens for the panic-quit
-    /// hotkey (⌃⌥⌘P). Belt-and-suspenders: the LockScreenWidgetPanel
-    /// canBecomeKey=false fix is the real defense against the
-    /// "locked-out at the password field" scenario, but this hotkey
-    /// is an escape hatch for any other state where the app is
-    /// stealing keys or otherwise wedged. macOS does NOT deliver
-    /// keystrokes to third-party apps during the actual lock screen
-    /// (loginwindow has exclusive secure input), so this hotkey only
-    /// works in *normal* operation — not while the system lock is up.
-    private var panicHotkeyGlobal: Any?
-    private var panicHotkeyLocal: Any?
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         notchController.show()
@@ -100,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         notchController.bindActivityEngine(idleNotchPill.engine)
         startActivitySources()
         mediaKeySuppressor.start()
-        installPanicHotkey()
+        registerGlobalShortcuts()
 
         // Install / remove the status-bar item live in response to the
         // user toggling "Show in Menu Bar" (toggle lives in the notch
@@ -337,43 +326,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Register a system-wide panic hotkey (⌃⌥⌘P) that immediately
     /// terminates NotchApp. Global monitor catches the keystroke even
-    /// when NotchApp isn't the active app; local monitor handles the
-    /// case where the app IS active (global monitors only fire for
-    /// OTHER apps' windows).
-    ///
-    /// Why ⌃⌥⌘P: four modifiers + a letter is virtually impossible to
-    /// hit accidentally. Easy to remember as "Panic". Use it if the
-    /// notch widget ever wedges (e.g. a private-API panel covering
-    /// something it shouldn't), to kill the app without opening
-    /// settings or any UI surface that might also be wedged.
-    ///
-    /// Note: this is useless while the SYSTEM lock screen is up —
-    /// macOS routes all key input to loginwindow during password
-    /// entry by design. The real defense for the lock-out scenario
-    /// is LockScreenWidgetPanel.canBecomeKey=false.
-    private func installPanicHotkey() {
-        let isPanic: (NSEvent) -> Bool = { event in
-            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            let expected: NSEvent.ModifierFlags = [.control, .option, .command]
-            return mods == expected
-                && event.charactersIgnoringModifiers?.lowercased() == "p"
+    /// Bind each user-configurable shortcut to its action. The
+    /// KeyboardShortcuts library persists user bindings + handles
+    /// (un)registration with the system globally; we just supply the
+    /// closures. Replaces the bespoke ⌃⌥⌘P panic hotkey — users who
+    /// want a kill-switch can bind one to the shortcut of their choice
+    /// (e.g. via a custom "togglePin" or by adding a new entry here).
+    private func registerGlobalShortcuts() {
+        KeyboardShortcuts.onKeyDown(for: .togglePin) { [weak self] in
+            self?.notchController.state.togglePinned()
         }
-
-        panicHotkeyGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            guard isPanic(event) else { return }
-            NSLog("[NotchApp] panic hotkey fired (global) — terminating")
-            DispatchQueue.main.async { NSApp.terminate(nil) }
+        KeyboardShortcuts.onKeyDown(for: .showClipboardHistory) { [weak self] in
+            self?.showHistory()
         }
-
-        panicHotkeyLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if isPanic(event) {
-                NSLog("[NotchApp] panic hotkey fired (local) — terminating")
-                DispatchQueue.main.async { NSApp.terminate(nil) }
-                return nil  // swallow the event
-            }
-            return event
+        KeyboardShortcuts.onKeyDown(for: .pasteTopClip) {
+            guard let top = ClipboardManager.shared.store.items.first else { return }
+            ClipboardManager.shared.store.copyToPasteboard(top)
+            // Simulate ⌘V so the topmost target app receives the paste.
+            // Synthesized via CGEvent so it works even when NotchApp isn't
+            // frontmost.
+            let src = CGEventSource(stateID: .combinedSessionState)
+            let down = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true)
+            let up = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false)
+            down?.flags = .maskCommand
+            up?.flags = .maskCommand
+            down?.post(tap: .cgAnnotatedSessionEventTap)
+            up?.post(tap: .cgAnnotatedSessionEventTap)
         }
-
-        NSLog("[NotchApp] panic hotkey installed: ⌃⌥⌘P")
+        KeyboardShortcuts.onKeyDown(for: .airDropTopShelfItem) {
+            // FileShelfStripView appends new tiles to the right; the most
+            // recent shelf item is `items.last`, matching the visible "top"
+            // when viewing the strip (newest closest to the user's eye).
+            guard let top = FileShelf.shared.store.items.last,
+                  let url = FileShelf.shared.store.resolvedURL(for: top) else { return }
+            AirDropService.send([url])
+        }
+        KeyboardShortcuts.onKeyDown(for: .clearShelf) {
+            FileShelf.shared.store.clearAll()
+        }
+        KeyboardShortcuts.onKeyDown(for: .openSettings) { [weak self] in
+            self?.openSettings()
+        }
     }
 }

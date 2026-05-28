@@ -1,4 +1,5 @@
 import SwiftUI
+import KeyboardShortcuts
 
 /// Root settings scene — tabbed across modules.
 struct SettingsView: View {
@@ -12,6 +13,7 @@ struct SettingsView: View {
                 Text("Ambient").tag(SettingsTab.ambient)
                 Text("Clipboard").tag(SettingsTab.clipboard)
                 Text("Conversion").tag(SettingsTab.conversion)
+                Text("Shortcuts").tag(SettingsTab.shortcuts)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -32,6 +34,8 @@ struct SettingsView: View {
                     AmbientSettingsView()
                 case .conversion:
                     ConversionSettingsView()
+                case .shortcuts:
+                    ShortcutsSettingsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -40,7 +44,29 @@ struct SettingsView: View {
     }
 }
 
-private enum SettingsTab { case clipboard, ambient, conversion }
+private enum SettingsTab { case clipboard, ambient, conversion, shortcuts }
+
+/// Recorder rows for every shortcut defined in `GlobalShortcuts.swift`.
+/// `KeyboardShortcuts.Recorder` handles capture, conflict detection, and
+/// persistence; AppDelegate wires the actions on launch.
+struct ShortcutsSettingsView: View {
+    var body: some View {
+        Form {
+            Section {
+                ForEach(KeyboardShortcuts.Name.all, id: \.0) { entry in
+                    KeyboardShortcuts.Recorder(entry.1, name: entry.0)
+                }
+            } footer: {
+                Text("Click a row to record a new key combination. Click the × inside the recorder to clear.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+            }
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+    }
+}
 
 /// Ambient pane: toggles for the optional bottom row + the calendar /
 /// reminders pickers. Built as a Form (matching ClipboardSettingsView) —
