@@ -170,7 +170,7 @@ struct NotchShellView: View {
             tabContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if appSettings.showTokenUsage {
+            if appSettings.showTokenUsage && selectedTab == .ambient {
                 TokenUsageSummaryRow()
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
