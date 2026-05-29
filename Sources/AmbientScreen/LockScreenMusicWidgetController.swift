@@ -57,6 +57,10 @@ final class LockScreenMusicWidgetController {
     private var idle = false
 
     private var ambient: AmbientSettings { AmbientSettings.shared }
+    /// Now-playing state. The music card + backdrop are gated on
+    /// `hasMedia` so they stay hidden when nothing is playing — only the
+    /// lock-notch indicator (a core lock-state feature) shows in that case.
+    private var musicState: NowPlayingState { MediaControls.shared.state }
 
     /// Panel height. Width spans the full main display so SwiftUI
     /// content can position columns at screen-relative percentages
@@ -107,6 +111,15 @@ final class LockScreenMusicWidgetController {
         ambient.$lockScreenWidgetVerticalOffset
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.recenter() }
+            .store(in: &cancellables)
+
+        // Re-evaluate visibility whenever media starts/stops so the card
+        // and backdrop appear when something begins playing and disappear
+        // when nothing is — even while the screen stays locked/idle.
+        musicState.$hasMedia
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshVisibility() }
             .store(in: &cancellables)
 
         // Register / unregister the lock-screen card as a lyrics
@@ -407,12 +420,19 @@ final class LockScreenMusicWidgetController {
         let caffeinated = IdleMonitor.hasPreventIdleAssertion()
         let isLockState = locked || lockObserver.isPreparingLock
         let shouldShow = isLockState || (idle && !caffeinated)
-        NSLog("[Visibility] locked=%@ idle=%@ preparing=%@ caffeinated=%@ -> show=%@ (lockState=%@)",
+        // The music card + backdrop only make sense when there's actually
+        // a track loaded — otherwise we'd surface an empty "Nothing
+        // playing" card on the lock screen. The lock-notch indicator is
+        // exempt: it reports lock state regardless of media.
+        let shouldShowMusic = shouldShow && musicState.hasMedia
+        NSLog("[Visibility] locked=%@ idle=%@ preparing=%@ caffeinated=%@ hasMedia=%@ -> show=%@ music=%@ (lockState=%@)",
               locked ? "Y" : "N",
               idle ? "Y" : "N",
               lockObserver.isPreparingLock ? "Y" : "N",
               caffeinated ? "Y" : "N",
+              musicState.hasMedia ? "Y" : "N",
               shouldShow ? "Y" : "N",
+              shouldShowMusic ? "Y" : "N",
               isLockState ? "Y" : "N")
 
         // Music card panel keeps `ignoresMouseEvents = false` even
@@ -427,18 +447,18 @@ final class LockScreenMusicWidgetController {
         // Backdrop rides the same show/hide as the card; opacity of
         // the blurred art + tint inside is gated by isArtworkLifted.
         if let backdropPanel {
-            if shouldShow, !backdropPanel.isVisible {
+            if shouldShowMusic, !backdropPanel.isVisible {
                 backdropPanel.orderFrontRegardless()
-            } else if !shouldShow, backdropPanel.isVisible {
+            } else if !shouldShowMusic, backdropPanel.isVisible {
                 backdropPanel.orderOut(nil)
             }
         }
 
         // Music card: simple show / hide.
         if let panel {
-            if shouldShow, !panel.isVisible {
+            if shouldShowMusic, !panel.isVisible {
                 panel.orderFrontRegardless()
-            } else if !shouldShow, panel.isVisible {
+            } else if !shouldShowMusic, panel.isVisible {
                 panel.orderOut(nil)
             }
         }
