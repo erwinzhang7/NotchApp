@@ -28,6 +28,7 @@ final class CalendarService: ObservableObject {
     private let settings: CalendarSettings
     private var cancellables: Set<AnyCancellable> = []
     private var storeChangedObserver: NSObjectProtocol?
+    private var dayChangedObserver: NSObjectProtocol?
 
     init(settings: CalendarSettings) {
         self.settings = settings
@@ -41,6 +42,21 @@ final class CalendarService: ObservableObject {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshIfAuthorized()
+            }
+        }
+
+        // Roll the wheel to the new "today" when the calendar day changes
+        // (fires at local midnight, and on wake / timezone change). Without
+        // this the selected date stayed pinned to the day the app launched,
+        // so each morning the wheel was centred on yesterday until the user
+        // manually scrolled.
+        dayChangedObserver = NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rollToToday()
             }
         }
 
@@ -58,6 +74,17 @@ final class CalendarService: ObservableObject {
         if let observer = storeChangedObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = dayChangedObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    /// Snap the displayed date back to the current day. Called on calendar
+    /// day-change so the wheel auto-advances; updating `selectedDate` makes
+    /// the wheel re-centre via its `onChange(of:)` and refreshes the list.
+    private func rollToToday() {
+        selectedDate = Foundation.Calendar.current.startOfDay(for: Date())
+        refreshIfAuthorized()
     }
 
     // MARK: - Permission
