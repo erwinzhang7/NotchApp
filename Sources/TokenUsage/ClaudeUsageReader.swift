@@ -3,7 +3,13 @@ import Foundation
 struct ClaudeUsageReader {
     func loadEvents() -> TokenUsageLoadResult {
         var result = TokenUsageLoadResult()
-        var processedHashes = Set<String>()
+        // Maps a messageId:requestId hash to its index in `result.events`.
+        // Claude writes several `usage` lines per assistant turn — partial
+        // streaming snapshots that share one message id + request id — and
+        // only the LAST carries the cumulative output. Keeping the first
+        // (as before) undercounted output by ~12%. Match ccusage: keep the
+        // last entry for each hash by overwriting in place.
+        var indexByHash: [String: Int] = [:]
         let roots = claudeRoots()
 
         if roots.isEmpty {
@@ -26,13 +32,6 @@ struct ClaudeUsageReader {
                         return
                     }
 
-                    if let messageID = TokenUsageJSONL.stringValue(message["id"]),
-                       let requestID = TokenUsageJSONL.stringValue(object["requestId"]) {
-                        let hash = "\(messageID):\(requestID)"
-                        guard !processedHashes.contains(hash) else { return }
-                        processedHashes.insert(hash)
-                    }
-
                     let input = TokenUsageJSONL.intValue(usage["input_tokens"])
                     let output = TokenUsageJSONL.intValue(usage["output_tokens"])
                     let cacheCreationTotal = TokenUsageJSONL.intValue(usage["cache_creation_input_tokens"])
@@ -51,7 +50,7 @@ struct ClaudeUsageReader {
                     let speed = TokenUsageJSONL.stringValue(usage["speed"])
                     let displayModel = speed == "fast" ? "\(rawModel)-fast" : rawModel
 
-                    result.events.append(TokenUsageEvent(
+                    let event = TokenUsageEvent(
                         source: .claude,
                         timestamp: timestamp,
                         sessionID: TokenUsageJSONL.stringValue(object["sessionId"]) ?? file.deletingPathExtension().lastPathComponent,
@@ -68,7 +67,23 @@ struct ClaudeUsageReader {
                         totalTokens: total,
                         estimatedCostUSD: TokenUsageJSONL.doubleValue(object["costUSD"]),
                         isFallbackModel: false
-                    ))
+                    )
+
+                    // Keep the last entry per messageId:requestId (cumulative
+                    // usage); entries lacking either id can't be deduped and
+                    // are always appended.
+                    if let messageID = TokenUsageJSONL.stringValue(message["id"]),
+                       let requestID = TokenUsageJSONL.stringValue(object["requestId"]) {
+                        let hash = "\(messageID):\(requestID)"
+                        if let index = indexByHash[hash] {
+                            result.events[index] = event
+                        } else {
+                            indexByHash[hash] = result.events.count
+                            result.events.append(event)
+                        }
+                    } else {
+                        result.events.append(event)
+                    }
                 }
             }
         }
