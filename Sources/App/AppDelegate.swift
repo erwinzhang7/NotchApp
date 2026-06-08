@@ -4,6 +4,13 @@ import KeyboardShortcuts
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// Reliable reference to the live AppDelegate. `NSApp.delegate` is a
+    /// SwiftUI-internal forwarding delegate under @NSApplicationDelegateAdaptor
+    /// on macOS 26, so `NSApp.delegate as? AppDelegate` is nil — callers that
+    /// need the delegate (e.g. the notch right-click menu) must go through
+    /// this. Weak because @NSApplicationDelegateAdaptor owns the strong ref.
+    static weak var shared: AppDelegate?
+
     private let notchController = NotchWindowController()
     private let lockScreenWidget = LockScreenMusicWidgetController()
     /// Per-display fullscreen detector so the idle pill hides over
@@ -52,6 +59,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var cancellables = Set<AnyCancellable>()
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Publish a reliable reference to ourselves. `NSApp.delegate` is
+        // NOT this instance under @NSApplicationDelegateAdaptor on macOS 26
+        // — SwiftUI installs its own forwarding delegate — so anything that
+        // did `NSApp.delegate as? AppDelegate` (e.g. the notch right-click
+        // menu) silently got nil and no-op'd. Reach the delegate through
+        // this static instead.
+        Self.shared = self
         NSApp.setActivationPolicy(.accessory)
         notchController.show()
         ClipboardManager.shared.monitor.start()

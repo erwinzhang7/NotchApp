@@ -18,6 +18,13 @@ final class TokenUsageStore: ObservableObject {
 
     func start() {
         schedulePricingRefresh()
+        // Load events immediately using whatever pricing is already cached —
+        // do NOT block the first load behind the network pricing fetch.
+        // (Gating the load on `refreshIfNeeded` meant a slow/stalled pricing
+        // request delayed all token data until the 300 s timer.)
+        Task { await refresh() }
+        // Refresh pricing in the background, then re-run once so costs pick
+        // up any newly-published model rates.
         Task {
             await pricingCache.refreshIfNeeded()
             await refresh()

@@ -123,6 +123,15 @@ final class BrightnessActivitySource: ObservableObject {
         guard getBrightness(displayID, &current) == 0, current.isFinite else { return }
         let next = min(max(current + delta, 0), 1)
         lastUserAdjustAt = Date()
+        if next == current {
+            // Already pinned at the boundary (0% / 100%): setBrightness is
+            // a no-op so the DisplayServices change callback never fires,
+            // and `refresh` would dedup against `previousLevel` anyway. Emit
+            // the ribbon directly so repeated key presses at the limit keep
+            // flashing the current level instead of going silent.
+            events.send(min(max(Int((current * 100).rounded()), 0), 100))
+            return
+        }
         _ = setBrightness(displayID, next)
     }
 

@@ -20,8 +20,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// can open behind other apps with no focus.
     func show() {
         if let window {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
+            AccessoryWindowPresenter.present(window)
             return
         }
 
@@ -38,12 +37,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         win.delegate = self
         window = win
 
-        NSApp.activate(ignoringOtherApps: true)
-        win.makeKeyAndOrderFront(nil)
+        AccessoryWindowPresenter.present(win)
     }
 
     func windowWillClose(_ notification: Notification) {
-        // No-op. With isReleasedWhenClosed = false the window stays around
-        // hidden; the next show() just re-orders it front.
+        // With isReleasedWhenClosed = false the window stays around hidden;
+        // the next show() just re-orders it front. Drop the activation
+        // policy back to .accessory if this was the last managed window.
+        if let window {
+            AccessoryWindowPresenter.managedWindowClosed(window)
+        }
     }
 }

@@ -3,6 +3,7 @@ import SwiftUI
 
 /// AppKit window wrapper around ClipboardHistoryView. The notch shell will eventually present
 /// the SwiftUI view directly; this window lets the status-bar launcher show it in the meantime.
+@MainActor
 final class ClipboardHistoryWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let store: ClipboardStore
@@ -14,6 +15,7 @@ final class ClipboardHistoryWindowController: NSObject, NSWindowDelegate {
     func toggle() {
         if let window, window.isVisible {
             window.orderOut(nil)
+            AccessoryWindowPresenter.managedWindowClosed(window)
             return
         }
         show()
@@ -21,8 +23,7 @@ final class ClipboardHistoryWindowController: NSObject, NSWindowDelegate {
 
     func show() {
         if let window {
-            window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            AccessoryWindowPresenter.present(window)
             return
         }
 
@@ -37,11 +38,15 @@ final class ClipboardHistoryWindowController: NSObject, NSWindowDelegate {
         win.delegate = self
         window = win
 
-        NSApp.activate(ignoringOtherApps: true)
-        win.makeKeyAndOrderFront(nil)
+        AccessoryWindowPresenter.present(win)
     }
 
     func windowWillClose(_ notification: Notification) {
-        // Keep the controller alive; just drop the window reference so the next show() rebuilds clean.
+        // Keep the controller alive; the next show() reuses the window.
+        // Drop the activation policy back to .accessory if this was the
+        // last managed window on screen.
+        if let window {
+            AccessoryWindowPresenter.managedWindowClosed(window)
+        }
     }
 }

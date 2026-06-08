@@ -169,19 +169,41 @@ final class VolumeActivitySource: ObservableObject {
         var size = UInt32(MemoryLayout<Float32>.size)
         guard AudioObjectGetPropertyData(outputDevice, &volumeAddress, 0, nil, &size, &current) == noErr,
               current.isFinite else { return }
-        var next = min(max(current + delta, 0), 1)
+        let next = min(max(current + delta, 0), 1)
         lastUserAdjustAt = Date()
-        AudioObjectSetPropertyData(outputDevice, &volumeAddress, 0, nil, size, &next)
 
-        if delta != 0, Self.hasProperty(Self.muteAddress, on: outputDevice) {
+        var changedSomething = false
+        if next != current {
+            var applied = next
+            AudioObjectSetPropertyData(outputDevice, &volumeAddress, 0, nil, size, &applied)
+            changedSomething = true
+        }
+
+        var isMuted = false
+        if Self.hasProperty(Self.muteAddress, on: outputDevice) {
             var muteAddress = Self.muteAddress
             var muted: UInt32 = 0
             var muteSize = UInt32(MemoryLayout<UInt32>.size)
-            if AudioObjectGetPropertyData(outputDevice, &muteAddress, 0, nil, &muteSize, &muted) == noErr,
-               muted != 0 {
-                var unmute: UInt32 = 0
-                AudioObjectSetPropertyData(outputDevice, &muteAddress, 0, nil, muteSize, &unmute)
+            if AudioObjectGetPropertyData(outputDevice, &muteAddress, 0, nil, &muteSize, &muted) == noErr {
+                isMuted = muted != 0
+                if delta != 0, muted != 0 {
+                    var unmute: UInt32 = 0
+                    AudioObjectSetPropertyData(outputDevice, &muteAddress, 0, nil, muteSize, &unmute)
+                    isMuted = false
+                    changedSomething = true
+                }
             }
+        }
+
+        if !changedSomething {
+            // Pinned at the boundary (0% / 100%) with nothing toggled: the
+            // CoreAudio listener won't fire, and `refresh` would dedup
+            // against `previousSnapshot` anyway. Emit directly so repeated
+            // key presses at the limit keep flashing the current level.
+            events.send(Snapshot(
+                level: min(max(Int((current * 100).rounded()), 0), 100),
+                isMuted: isMuted
+            ))
         }
     }
 

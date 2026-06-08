@@ -155,10 +155,10 @@ struct NotchShellView: View {
     @ViewBuilder
     private var notchContextMenu: some View {
         Button("Open Settings…") {
-            (NSApp.delegate as? AppDelegate)?.openSettings()
+            AppDelegate.shared?.openSettings()
         }
         Button("Show Clipboard History") {
-            (NSApp.delegate as? AppDelegate)?.showHistory()
+            AppDelegate.shared?.showHistory()
         }
         Toggle("Show in Menu Bar", isOn: $appSettings.showInMenuBar)
         Divider()
