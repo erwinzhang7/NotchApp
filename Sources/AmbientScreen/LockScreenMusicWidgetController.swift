@@ -354,12 +354,22 @@ final class LockScreenMusicWidgetController {
     /// display's logical width so the SwiftUI inside can position
     /// columns at screen-relative percentages.
     private func recenter() {
-        guard let panel, let screen = NSScreen.main?.frame else { return }
-        currentPanelSize = NSSize(width: screen.width, height: Self.panelHeight)
-        panel.setFrame(
-            NSRect(origin: position(on: screen, size: currentPanelSize), size: currentPanelSize),
-            display: true
-        )
+        guard let screen = NSScreen.main?.frame else { return }
+        if let panel {
+            currentPanelSize = NSSize(width: screen.width, height: Self.panelHeight)
+            panel.setFrame(
+                NSRect(origin: position(on: screen, size: currentPanelSize), size: currentPanelSize),
+                display: true
+            )
+        }
+        // The backdrop hosts the lock-screen clock, which SwiftUI centers
+        // on the panel's width. It used to be framed once at launch in
+        // `makeBackdropPanel` and never updated, so any later display /
+        // resolution / scaling change — or a sleep-wake that reconfigures
+        // the screen — left the centered clock stranded on a stale frame,
+        // reading as a horizontally off-center clock. Pin it to the current
+        // main screen on every recenter.
+        backdropPanel?.setFrame(screen, display: true)
     }
 
     /// Forward lock-screen lyrics visibility through the legacy consumer API.
@@ -419,7 +429,14 @@ final class LockScreenMusicWidgetController {
         // screen is actually going to / is locked at that point.
         let caffeinated = IdleMonitor.hasPreventIdleAssertion()
         let isLockState = locked || lockObserver.isPreparingLock
-        let shouldShow = isLockState || (idle && !caffeinated)
+        // The widget now surfaces ONLY for an actual lock or screensaver
+        // (screensaver routes through `locked` via onScreensaverStart). The
+        // old idle-while-awake trigger — `idle && !caffeinated` — was
+        // popping the widget over a fully-lit screen whenever the idle timer
+        // fired without a display-sleep assertion present, which is exactly
+        // the "play stuff shows up when the screen is still on" annoyance.
+        // `idle`/`caffeinated` are retained for the diagnostic log only.
+        let shouldShow = isLockState
         // The music card + backdrop only make sense when there's actually
         // a track loaded — otherwise we'd surface an empty "Nothing
         // playing" card on the lock screen. The lock-notch indicator is
@@ -443,6 +460,16 @@ final class LockScreenMusicWidgetController {
         // canBecomeKey = false. Mouse events route by cursor position
         // and do NOT interfere with loginwindow's password entry —
         // secure input is keyboard-only.
+
+        // Before surfacing either panel, re-pin both to the current main
+        // screen. `recenter()` otherwise only runs on screen-parameter
+        // changes, so a panel created with a stale launch-time frame (off-
+        // center clock) would never get corrected until the next display
+        // reconfiguration. Cheap no-op when the frame already matches.
+        if shouldShowMusic,
+           !(panel?.isVisible ?? false) || !(backdropPanel?.isVisible ?? false) {
+            recenter()
+        }
 
         // Backdrop rides the same show/hide as the card; opacity of
         // the blurred art + tint inside is gated by isArtworkLifted.

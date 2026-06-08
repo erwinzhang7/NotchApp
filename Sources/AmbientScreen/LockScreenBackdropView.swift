@@ -21,26 +21,34 @@ struct LockScreenBackdropView: View {
             // screen. Sits below the loginwindow's clock + login UI in
             // z-order (system UI hidden behind us).
             ZStack {
+                // Base layer: blurred art once it lands, dark fill until
+                // then (or if the blur fails / there's no art).
                 if let blurred = blurService.blurredArtwork {
                     Image(nsImage: blurred)
                         .resizable()
                         .scaledToFill()
                         .clipped()
                         .overlay(Color.black.opacity(0.55))
-                        .overlay(
-                            RadialGradient(
-                                colors: [
-                                    ArtworkColor.accent(for: musicState.artwork).opacity(0.22),
-                                    .clear
-                                ],
-                                center: .center,
-                                startRadius: 60,
-                                endRadius: 800
-                            )
-                        )
                 } else {
                     Color.black.opacity(0.75)
                 }
+
+                // Accent radial wash — driven by the decoded artwork, NOT
+                // the blurred image, so the track-tied color appears the
+                // moment the backdrop is shown rather than waiting on the
+                // background-thread blur. Previously this lived inside the
+                // `if let blurred` branch, so a slow or failed blur left a
+                // flat black backdrop with no color at all (the "background
+                // color sometimes doesn't show up" bug).
+                RadialGradient(
+                    colors: [
+                        ArtworkColor.accent(for: musicState.artwork).opacity(0.22),
+                        .clear
+                    ],
+                    center: .center,
+                    startRadius: 60,
+                    endRadius: 800
+                )
             }
             .ignoresSafeArea()
 
