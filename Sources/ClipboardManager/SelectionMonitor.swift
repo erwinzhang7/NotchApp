@@ -65,6 +65,20 @@ final class SelectionMonitor {
     /// sit at similar depth. 4 covers both with headroom.
     private let maxDescentDepth: Int = 4
 
+    /// Hard cap on AX elements inspected during a single tick's descent.
+    /// The focused element occasionally roots a wide subtree (complex web
+    /// pages, large lists, Electron views); without a budget the recursive
+    /// child walk fans out into thousands of synchronous cross-process AX
+    /// calls on the main thread and freezes the whole UI. The intended
+    /// targets — an AXWebArea a few levels down — are found well within this.
+    private let maxNodesPerTick: Int = 64
+
+    /// Ceiling on how long any single AX IPC call may block. A synchronous
+    /// `AXUIElementCopyAttributeValue` to a busy or wedged app otherwise
+    /// waits on `mach_msg` indefinitely, hanging the main thread. Set on the
+    /// system-wide element, which applies to every element we read from it.
+    private let axMessagingTimeout: Float = 0.1
+
     /// Last non-empty trimmed text we observed at a poll. When two
     /// consecutive ticks see the same text, we publish once and clear
     /// `lastPublishedText` is updated so we don't re-publish until the
@@ -106,7 +120,9 @@ final class SelectionMonitor {
     // MARK: - Poll
 
     private func installPollTimer() {
-        systemElement = AXUIElementCreateSystemWide()
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, axMessagingTimeout)
+        systemElement = system
         let timer = Timer(timeInterval: pollInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -142,7 +158,8 @@ final class SelectionMonitor {
             return
         }
 
-        guard let raw = selectedText(in: element, maxDepth: maxDescentDepth) else {
+        var budget = maxNodesPerTick
+        guard let raw = selectedText(in: element, maxDepth: maxDescentDepth, budget: &budget) else {
             lastSeenText = nil
             return
         }
@@ -165,11 +182,13 @@ final class SelectionMonitor {
     /// Try the focused element directly (fast path for native text
     /// fields), then walk children to a bounded depth. Returns the
     /// first non-empty `kAXSelectedTextAttribute` found.
-    private func selectedText(in element: AXUIElement, maxDepth: Int) -> String? {
+    private func selectedText(in element: AXUIElement, maxDepth: Int, budget: inout Int) -> String? {
         if let direct = directSelectedText(element) { return direct }
         guard maxDepth > 0 else { return nil }
         for child in childrenOf(element) {
-            if let nested = selectedText(in: child, maxDepth: maxDepth - 1) {
+            guard budget > 0 else { return nil }
+            budget -= 1
+            if let nested = selectedText(in: child, maxDepth: maxDepth - 1, budget: &budget) {
                 return nested
             }
         }
