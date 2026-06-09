@@ -111,7 +111,17 @@ final class VolumeActivitySource: ObservableObject {
         }
 
         outputDevice = device
-        if Self.hasProperty(Self.virtualMainVolumeAddress, on: device) {
+        // Prefer a *settable* volume property. Some devices (HDMI/DisplayPort,
+        // many Bluetooth/AirPlay, aggregate devices) expose a volume property
+        // that is read-only — binding it leaves `adjust(by:)` writing into a
+        // no-op, so the level appears frozen (often at a fixed 0.5) while mute,
+        // a separate property, keeps working. Fall back to hasProperty only if
+        // neither reports settable, so the HUD can still mirror the level.
+        if Self.isSettable(Self.virtualMainVolumeAddress, on: device) {
+            volumeAddress = Self.virtualMainVolumeAddress
+        } else if Self.isSettable(Self.scalarVolumeAddress, on: device) {
+            volumeAddress = Self.scalarVolumeAddress
+        } else if Self.hasProperty(Self.virtualMainVolumeAddress, on: device) {
             volumeAddress = Self.virtualMainVolumeAddress
         } else if Self.hasProperty(Self.scalarVolumeAddress, on: device) {
             volumeAddress = Self.scalarVolumeAddress
@@ -175,8 +185,13 @@ final class VolumeActivitySource: ObservableObject {
         var changedSomething = false
         if next != current {
             var applied = next
-            AudioObjectSetPropertyData(outputDevice, &volumeAddress, 0, nil, size, &applied)
-            changedSomething = true
+            // Only count it as a change if the device actually accepted the
+            // write. A read-only volume property returns an error here; if we
+            // assumed success we'd suppress the fallback emit below and the HUD
+            // would go dark on a device whose level can't move.
+            if AudioObjectSetPropertyData(outputDevice, &volumeAddress, 0, nil, size, &applied) == noErr {
+                changedSomething = true
+            }
         }
 
         var isMuted = false
@@ -260,6 +275,14 @@ final class VolumeActivitySource: ObservableObject {
     private static func hasProperty(_ address: AudioObjectPropertyAddress, on device: AudioObjectID) -> Bool {
         var address = address
         return AudioObjectHasProperty(device, &address)
+    }
+
+    private static func isSettable(_ address: AudioObjectPropertyAddress, on device: AudioObjectID) -> Bool {
+        var address = address
+        guard AudioObjectHasProperty(device, &address) else { return false }
+        var settable: DarwinBoolean = false
+        guard AudioObjectIsPropertySettable(device, &address, &settable) == noErr else { return false }
+        return settable.boolValue
     }
 
     nonisolated(unsafe) private static let systemOutputChanged: AudioObjectPropertyListenerProc = { _, _, _, context in
