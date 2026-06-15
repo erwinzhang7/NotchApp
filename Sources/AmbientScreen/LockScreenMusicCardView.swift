@@ -107,40 +107,17 @@ struct LockScreenMusicCardView: View {
         // GeometryReader provides the panel width (= main display
         // width since the controller sizes the panel to the full
         // screen). Columns use absolute positioning via .position().
-        GeometryReader { geo in
-            ZStack(alignment: .topLeading) {
-                leftColumn
-                    // Bottom-aligned inside the fixed-height frame so
-                    // the column's bottom edge lands at the same Y
-                    // whether we're showing just the small card or
-                    // the full artwork + card stack.
-                    .frame(
-                        width: leftColumnWidth,
-                        height: leftColumnFrameHeight,
-                        alignment: .bottom
-                    )
-                    .position(
-                        x: leftColumnCenterX(in: geo.size.width),
-                        y: geo.size.height / 2
-                    )
-
-                if showsLyricsColumn {
-                    let lyricsLeading = geo.size.width * 0.5 + 20
-                    let lyricsWidth = max(0, geo.size.width - lyricsLeading - 16)
-                    lyricsColumn
-                        // Match the left column's frame height so the
-                        // lyrics scroller occupies the same vertical
-                        // band as the artwork + card.
-                        .frame(
-                            width: lyricsWidth,
-                            height: leftColumnFrameHeight,
-                            alignment: .leading
-                        )
-                        .position(
-                            x: lyricsLeading + lyricsWidth / 2,
-                            y: geo.size.height / 2
-                        )
-                }
+        // Two fully independent layouts — the with/without-lyrics cases
+        // no longer share any positioning math. The no-lyrics case is the
+        // one users see most, so it must be rock-solid centered; the
+        // shared GeometryReader + .position() math meant a stray panel /
+        // padding change in the lyrics path could pull the no-lyrics card
+        // off-center. They're now decoupled.
+        Group {
+            if showsLyricsColumn {
+                withLyricsLayout
+            } else {
+                withoutLyricsLayout
             }
         }
         .padding(cardPadding)
@@ -148,12 +125,63 @@ struct LockScreenMusicCardView: View {
         .preferredColorScheme(.dark)
     }
 
-    /// Horizontal center of the art + card column, in panel-local
-    /// coordinates. Centered on screen when there's no lyrics column;
-    /// shifted to the 25%-from-left mark when lyrics need room on
-    /// the right.
-    private func leftColumnCenterX(in panelWidth: CGFloat) -> CGFloat {
-        showsLyricsColumn ? panelWidth * 0.25 : panelWidth * 0.5
+    /// **No-lyrics** (compact or lifted-without-lyrics). Art + card dead-
+    /// center on the panel — and therefore on the screen, since the panel
+    /// spans the full display width. Centered with frames ONLY (no
+    /// GeometryReader / `.position()` coordinate math), so it lands exactly
+    /// in the middle regardless of the panel's padding or width. This is
+    /// the case that kept drifting off-center when it shared geometry with
+    /// the lyrics layout.
+    private var withoutLyricsLayout: some View {
+        leftColumn
+            // Bottom-aligned inside the fixed-height frame so the column's
+            // bottom edge lands at the same Y whether we're showing just
+            // the small card or the full artwork + card stack.
+            .frame(
+                width: leftColumnWidth,
+                height: leftColumnFrameHeight,
+                alignment: .bottom
+            )
+            // maxWidth/maxHeight .infinity centers the fixed-size column in
+            // the available space — exact center, no arithmetic.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// **With lyrics**: art + card centered on the 25%-from-left mark,
+    /// lyrics column left-aligned starting at midpoint + 20pt and running
+    /// to the right edge. Absolute positioning via GeometryReader, isolated
+    /// here so it can never affect the no-lyrics centering above.
+    private var withLyricsLayout: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                leftColumn
+                    .frame(
+                        width: leftColumnWidth,
+                        height: leftColumnFrameHeight,
+                        alignment: .bottom
+                    )
+                    .position(
+                        x: geo.size.width * 0.25,
+                        y: geo.size.height / 2
+                    )
+
+                let lyricsLeading = geo.size.width * 0.5 + 20
+                let lyricsWidth = max(0, geo.size.width - lyricsLeading - 16)
+                lyricsColumn
+                    // Match the left column's frame height so the lyrics
+                    // scroller occupies the same vertical band as the
+                    // artwork + card.
+                    .frame(
+                        width: lyricsWidth,
+                        height: leftColumnFrameHeight,
+                        alignment: .leading
+                    )
+                    .position(
+                        x: lyricsLeading + lyricsWidth / 2,
+                        y: geo.size.height / 2
+                    )
+            }
+        }
     }
 
     // MARK: - Layouts
