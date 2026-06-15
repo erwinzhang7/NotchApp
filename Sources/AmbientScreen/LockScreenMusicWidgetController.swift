@@ -24,11 +24,22 @@ final class LockScreenMusicWidgetController {
     /// Owned here so its lifetime tracks the widget controller and
     /// its cache survives panel hide/show cycles.
     private let blurService = LockScreenBlurService()
-    private var panel: NSPanel?
-    /// Full-screen blurred-art + accent-tint backdrop behind the music
-    /// card. Only visually relevant while artwork is lifted; opacity
-    /// inside SwiftUI gates that.
-    private var backdropPanel: NSPanel?
+    /// One card + backdrop pair per active display. The lock widget mirrors
+    /// onto every screen — all pairs share the same music/card/blur/lyrics
+    /// state objects, so they render identical content; only their frames
+    /// differ (each pinned to its own display). The lock-notch indicator is
+    /// NOT mirrored — it stays on the notched built-in display only, since
+    /// externals have no hardware notch.
+    private struct MusicScreenPanels {
+        let displayID: CGDirectDisplayID
+        /// Interactive music card (transport + scrubber).
+        let card: NSPanel
+        /// Full-screen blurred-art + accent-tint backdrop (hosts the clock).
+        /// Only visually relevant while artwork is lifted; opacity inside
+        /// SwiftUI gates that.
+        let backdrop: NSPanel
+    }
+    private var musicPanels: [MusicScreenPanels] = []
     /// Small notch-shaped widget at the screen's notch position that
     /// displays the lock state. On unlock we hold visible briefly so
     /// the `lock.fill → lock.open.fill` symbol morph plays, then
@@ -77,11 +88,6 @@ final class LockScreenMusicWidgetController {
     /// inside without ever touching `panel.animator()`.
     private static let panelHeight: CGFloat = 540
 
-    /// Resolved panel size at the moment of panel construction.
-    /// Width = the main display's logical width; height = `panelHeight`.
-    /// Captured into the instance at `makePanel` time so screen
-    /// reconfiguration after launch doesn't silently un-fit the panel.
-    private var currentPanelSize: NSSize = NSSize(width: 1512, height: 540)
     /// Stable consumer key the controller uses to subscribe to the
     /// lyrics service. String constant so registration is idempotent.
     private static let lyricsConsumerKey = "lockScreen"
@@ -163,15 +169,53 @@ final class LockScreenMusicWidgetController {
     }
 
     private func buildMusicPanelsIfNeeded() {
-        // Backdrop FIRST so it lands at the bottom of the SkyLight
-        // space's z-order; the card stacks on top.
-        if backdropPanel == nil {
-            backdropPanel = registerAndAssign(makeBackdropPanel())
-        }
-        if panel == nil {
-            panel = registerAndAssign(makePanel())
-        }
+        syncMusicPanelsToScreens()
         logPanelConfiguration()
+    }
+
+    /// Display ID for a screen, used as the stable key that matches a
+    /// card+backdrop pair to its display across reconfigurations.
+    private static func displayID(for screen: NSScreen) -> CGDirectDisplayID {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) ?? 0
+    }
+
+    /// Create / destroy / reposition the per-display card+backdrop pairs so
+    /// there's exactly one pair per active screen. Idempotent — safe to call
+    /// on build, on screen-config change, and before each show. With a single
+    /// display this produces exactly one pair, identical to the pre-mirroring
+    /// behavior.
+    private func syncMusicPanelsToScreens() {
+        let screens = NSScreen.screens
+        let wantedIDs = Set(screens.map(Self.displayID(for:)))
+
+        // Tear down pairs whose display was unplugged.
+        for stale in musicPanels where !wantedIDs.contains(stale.displayID) {
+            stale.card.orderOut(nil)
+            stale.backdrop.orderOut(nil)
+        }
+        musicPanels.removeAll { !wantedIDs.contains($0.displayID) }
+
+        for screen in screens {
+            let id = Self.displayID(for: screen)
+            if let existing = musicPanels.first(where: { $0.displayID == id }) {
+                // Existing display — re-pin to its current frame so a
+                // resolution / scaling change can't strand the panel.
+                existing.backdrop.setFrame(screen.frame, display: true)
+                let size = NSSize(width: screen.frame.width, height: Self.panelHeight)
+                existing.card.setFrame(
+                    NSRect(origin: position(on: screen.frame, size: size), size: size),
+                    display: true
+                )
+            } else {
+                // New display — build the pair. Backdrop FIRST so it lands
+                // beneath the card in the SkyLight space's z-order.
+                let backdrop = registerAndAssign(makeBackdropPanel(for: screen))
+                let card = registerAndAssign(makePanel(for: screen))
+                musicPanels.append(
+                    MusicScreenPanels(displayID: id, card: card, backdrop: backdrop)
+                )
+            }
+        }
     }
 
     /// One-shot forensic log of each lock-screen panel's configuration.
@@ -195,8 +239,10 @@ final class LockScreenMusicWidgetController {
                   p.level.rawValue,
                   p.alphaValue)
         }
-        summarize("musicCard", panel)
-        summarize("backdrop", backdropPanel)
+        for (i, mp) in musicPanels.enumerated() {
+            summarize("musicCard[\(i)] display=\(mp.displayID)", mp.card)
+            summarize("backdrop[\(i)] display=\(mp.displayID)", mp.backdrop)
+        }
         summarize("lockNotch", lockNotchPanel)
     }
 
@@ -321,12 +367,13 @@ final class LockScreenMusicWidgetController {
         idleMonitor.stop()
         stopKeyboardPoll()
         blurService.stop()
-        panel?.orderOut(nil)
-        panel = nil
+        for mp in musicPanels {
+            mp.card.orderOut(nil)
+            mp.backdrop.orderOut(nil)
+        }
+        musicPanels.removeAll()
         lockNotchPanel?.orderOut(nil)
         lockNotchPanel = nil
-        backdropPanel?.orderOut(nil)
-        backdropPanel = nil
         if let token = screenChangeObserver {
             NotificationCenter.default.removeObserver(token)
             screenChangeObserver = nil
@@ -339,37 +386,28 @@ final class LockScreenMusicWidgetController {
         idleMonitor.stop()
         stopKeyboardPoll()
         blurService.stop()
-        panel?.orderOut(nil)
-        panel = nil
-        backdropPanel?.orderOut(nil)
-        backdropPanel = nil
+        for mp in musicPanels {
+            mp.card.orderOut(nil)
+            mp.backdrop.orderOut(nil)
+        }
+        musicPanels.removeAll()
         // Reset the music-only state flags so the next enable doesn't
         // inherit a stale "idle" reading from before the toggle.
         idle = false
     }
 
-    /// Reposition the panel using the current settings (vertical offset
-    /// from center). Called at launch, on screen-config changes, and
-    /// whenever the offset slider moves. Width tracks the main
-    /// display's logical width so the SwiftUI inside can position
-    /// columns at screen-relative percentages.
+    /// Reconcile the per-display panels with the current screen layout:
+    /// adds pairs for newly-attached displays, drops pairs for detached
+    /// ones, and re-pins every kept pair to its display's current frame
+    /// (vertical offset from center applied per screen). Called at launch,
+    /// on screen-config changes, and whenever the offset slider moves.
+    ///
+    /// Re-pinning matters for the backdrop especially: it hosts the
+    /// lock-screen clock, which SwiftUI centers on the panel width. A panel
+    /// left on a stale frame after a resolution / scaling change strands the
+    /// centered clock off to one side.
     private func recenter() {
-        guard let screen = NSScreen.main?.frame else { return }
-        if let panel {
-            currentPanelSize = NSSize(width: screen.width, height: Self.panelHeight)
-            panel.setFrame(
-                NSRect(origin: position(on: screen, size: currentPanelSize), size: currentPanelSize),
-                display: true
-            )
-        }
-        // The backdrop hosts the lock-screen clock, which SwiftUI centers
-        // on the panel's width. It used to be framed once at launch in
-        // `makeBackdropPanel` and never updated, so any later display /
-        // resolution / scaling change — or a sleep-wake that reconfigures
-        // the screen — left the centered clock stranded on a stale frame,
-        // reading as a horizontally off-center clock. Pin it to the current
-        // main screen on every recenter.
-        backdropPanel?.setFrame(screen, display: true)
+        syncMusicPanelsToScreens()
     }
 
     /// Forward lock-screen lyrics visibility through the legacy consumer API.
@@ -461,32 +499,29 @@ final class LockScreenMusicWidgetController {
         // and do NOT interfere with loginwindow's password entry —
         // secure input is keyboard-only.
 
-        // Before surfacing either panel, re-pin both to the current main
-        // screen. `recenter()` otherwise only runs on screen-parameter
-        // changes, so a panel created with a stale launch-time frame (off-
-        // center clock) would never get corrected until the next display
-        // reconfiguration. Cheap no-op when the frame already matches.
+        // Before surfacing the panels, reconcile them with the current
+        // screen layout and re-pin each to its display's frame. `recenter()`
+        // otherwise only runs on screen-parameter changes, so a panel created
+        // with a stale launch-time frame (off-center clock) — or a display
+        // attached while already locked — would go uncorrected. Also picks up
+        // any newly-attached monitor so the widget mirrors onto it. Cheap
+        // no-op when nothing changed.
         if shouldShowMusic,
-           !(panel?.isVisible ?? false) || !(backdropPanel?.isVisible ?? false) {
-            recenter()
+           musicPanels.isEmpty
+            || musicPanels.contains(where: { !$0.card.isVisible || !$0.backdrop.isVisible }) {
+            syncMusicPanelsToScreens()
         }
 
-        // Backdrop rides the same show/hide as the card; opacity of
-        // the blurred art + tint inside is gated by isArtworkLifted.
-        if let backdropPanel {
-            if shouldShowMusic, !backdropPanel.isVisible {
-                backdropPanel.orderFrontRegardless()
-            } else if !shouldShowMusic, backdropPanel.isVisible {
-                backdropPanel.orderOut(nil)
-            }
-        }
-
-        // Music card: simple show / hide.
-        if let panel {
-            if shouldShowMusic, !panel.isVisible {
-                panel.orderFrontRegardless()
-            } else if !shouldShowMusic, panel.isVisible {
-                panel.orderOut(nil)
+        // Backdrop + card ride the same show/hide on every display. Backdrop
+        // first so it stays beneath the card; opacity of the blurred art +
+        // tint inside is gated by isArtworkLifted.
+        for mp in musicPanels {
+            if shouldShowMusic {
+                if !mp.backdrop.isVisible { mp.backdrop.orderFrontRegardless() }
+                if !mp.card.isVisible { mp.card.orderFrontRegardless() }
+            } else {
+                if mp.backdrop.isVisible { mp.backdrop.orderOut(nil) }
+                if mp.card.isVisible { mp.card.orderOut(nil) }
             }
         }
 
@@ -571,14 +606,13 @@ final class LockScreenMusicWidgetController {
 
     // MARK: - Panel
 
-    private func makePanel() -> NSPanel {
+    private func makePanel(for screen: NSScreen) -> NSPanel {
         // Full screen width so SwiftUI can position the artwork
         // column and lyrics column at absolute screen-relative
         // positions. Height fixed at `panelHeight`.
-        let screen = NSScreen.main?.frame ?? NSRect(x: 0, y: 0, width: 1512, height: 982)
-        let size = NSSize(width: screen.width, height: Self.panelHeight)
-        currentPanelSize = size
-        let origin = position(on: screen, size: size)
+        let screenFrame = screen.frame
+        let size = NSSize(width: screenFrame.width, height: Self.panelHeight)
+        let origin = position(on: screenFrame, size: size)
         let p = LockScreenWidgetPanel(
             contentRect: NSRect(origin: origin, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -705,11 +739,11 @@ final class LockScreenMusicWidgetController {
     /// gradient that fades in only while the music card's artwork is
     /// in the lifted state. Sits behind the music card and lock notch
     /// indicator in the same SkyLight space.
-    private func makeBackdropPanel() -> NSPanel {
-        let screen = NSScreen.main?.frame ?? .zero
+    private func makeBackdropPanel(for screen: NSScreen) -> NSPanel {
+        let screenFrame = screen.frame
 
         let p = LockScreenWidgetPanel(
-            contentRect: screen,
+            contentRect: screenFrame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -738,7 +772,7 @@ final class LockScreenMusicWidgetController {
             cardState: cardState,
             blurService: blurService
         ))
-        host.frame = NSRect(origin: .zero, size: screen.size)
+        host.frame = NSRect(origin: .zero, size: screenFrame.size)
         host.autoresizingMask = [.width, .height]
         p.contentView = host
         return p
