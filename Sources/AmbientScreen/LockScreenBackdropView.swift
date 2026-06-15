@@ -23,10 +23,26 @@ struct LockScreenBackdropView: View {
             ZStack {
                 // Base layer: blurred art once it lands, dark fill until
                 // then (or if the blur fails / there's no art).
+                //
+                // The art fills via an overlay on a container-sized Color
+                // rather than being a direct child. `scaledToFill()` makes
+                // the image's LAYOUT size equal to the (overflowing) scaled
+                // image — a wide 16:9 thumbnail becomes ~1748pt wide on a
+                // 1512pt display. `.clipped()` only clips the drawing, not
+                // that layout size, so as a direct child the image grew the
+                // backdrop ZStack past screen width; the ZStack then
+                // anchored leading and the "centered" clock landed ~130pt
+                // right of true center. Anchoring on a full-size Color (which
+                // accepts the proposed size) and clipping the image overlay
+                // to it keeps the layer exactly screen-sized, so the clock
+                // centers correctly regardless of artwork aspect ratio.
                 if let blurred = blurService.blurredArtwork {
-                    Image(nsImage: blurred)
-                        .resizable()
-                        .scaledToFill()
+                    Color.black
+                        .overlay {
+                            Image(nsImage: blurred)
+                                .resizable()
+                                .scaledToFill()
+                        }
                         .clipped()
                         .overlay(Color.black.opacity(0.55))
                 } else {
@@ -59,6 +75,10 @@ struct LockScreenBackdropView: View {
             // gradient that approximates the system clock's vibrant
             // "shine".
             clockOverlay
+                // Span the full width and center within it, so the clock is
+                // anchored to the screen center independent of any sibling
+                // layer's geometry.
+                .frame(maxWidth: .infinity)
                 .padding(.top, 90)
         }
         // Visible when artwork is lifted AND the user isn't typing.
