@@ -1,13 +1,24 @@
+<div align="center">
+
 # NotchApp
 
-A macOS notch utility that turns the MacBook notch into a live control surface: Dynamic Island-style activities, clipboard history, drag-and-drop file shelf, media controls, a calendar and reminders dashboard, lock-screen presentation, and file conversion — all tucked behind the notch, out of the way until you need them.
+**Turn the MacBook notch into a live control surface.**
 
-Built in Swift + SwiftUI. Runs as a menu-bar agent (no dock icon). macOS 15+.
+Dynamic Island-style activities · clipboard history · drag-and-drop file shelf · media controls · calendar & reminders · file conversion — all tucked behind the notch, out of the way until you need them.
 
----
+[![Latest release](https://img.shields.io/github/v/release/erwinzhang7/NotchApp?label=release&color=22c55e)](https://github.com/erwinzhang7/NotchApp/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/erwinzhang7/NotchApp/total?color=3b82f6)](https://github.com/erwinzhang7/NotchApp/releases)
+[![License](https://img.shields.io/github/license/erwinzhang7/NotchApp)](LICENSE)
+![macOS 15+](https://img.shields.io/badge/macOS-15%2B-black?logo=apple&logoColor=white)
+![SwiftUI + AppKit](https://img.shields.io/badge/SwiftUI%20%2B%20AppKit-fa7343?logo=swift&logoColor=white)
 
-<!-- SCREENSHOT / GIF PLACEHOLDER — add a demo GIF or screenshot here -->
-<!-- Example: ![Demo](assets/demo.gif) -->
+</div>
+
+Runs as a menu-bar agent — no dock icon, no third-party dependencies. macOS 15+.
+
+```sh
+brew install erwinzhang7/notchapp/notchapp
+```
 
 ---
 
@@ -204,15 +215,6 @@ These permissions are optional. Denying one disables or limits only its related 
 - **Media metadata** (track title, artist, artwork) is received from the local MediaRemote subsystem. It stays local.
 - **Lyrics** are prefetched from LRCLIB for playing tracks so they are ready when opened, and are cached locally by the lyrics provider.
 - There is no analytics or crash reporting included in the app.
-
----
-
-## Screenshots
-
-<!-- PLACEHOLDER — add screenshots below once available -->
-<!-- ![Clipboard tab](assets/screenshot-clipboard.png) -->
-<!-- ![Ambient tab](assets/screenshot-ambient.png) -->
-<!-- ![File shelf](assets/screenshot-shelf.png) -->
 
 ---
 
