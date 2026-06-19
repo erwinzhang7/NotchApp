@@ -39,6 +39,10 @@ final class NotchWindowController: NSObject {
     private var collapsedPanelFrame: CGRect = .zero
     private var expandedPanelFrame: CGRect = .zero
     private var screenObserver: NSObjectProtocol?
+    /// Pending debounced reposition. Display reconnects fire
+    /// didChangeScreenParameters several times and AppKit relocates windows
+    /// mid-transition, so we re-apply the frame once the layout has settled.
+    private var repositionWorkItem: DispatchWorkItem?
     private var globalClickMonitor: Any?
     private var mouseMovedMonitor: EventMonitor?
     private var cancellables = Set<AnyCancellable>()
@@ -96,6 +100,11 @@ final class NotchWindowController: NSObject {
         ))
         hosting.frame = NSRect(origin: .zero, size: expandedPanelFrame.size)
         hosting.autoresizingMask = [.width, .height]
+        // Never let the hosting view impose its content's intrinsic size on
+        // the window. Without this, a relayout (notably during a display
+        // reconnect) shrinks the panel to the SwiftUI canvas width and shifts
+        // it off-center; the window must keep exactly the frame we set.
+        hosting.sizingOptions = []
         panel.contentView = hosting
         panel.ignoresMouseEvents = !state.isExpanded
 
@@ -110,7 +119,7 @@ final class NotchWindowController: NSObject {
             // Observer block isn't @MainActor-typed but we registered it
             // on the main queue, so this is safe.
             MainActor.assumeIsolated {
-                self?.reposition()
+                self?.scheduleReposition()
             }
         }
 
@@ -145,6 +154,12 @@ final class NotchWindowController: NSObject {
                 // with a pure spring. We only toggle mouse-event
                 // passthrough so the now-transparent expanded area lets
                 // clicks reach apps below while collapsed.
+                // Re-assert the frame on expand so any drift (a display
+                // reconnect can leave the window moved/resized by AppKit)
+                // is corrected the moment the expanded view becomes visible.
+                if isExpanded, panel.frame != self.expandedPanelFrame {
+                    panel.setFrame(self.expandedPanelFrame, display: true)
+                }
                 panel.ignoresMouseEvents = !isExpanded
             }
             .store(in: &cancellables)
@@ -174,6 +189,8 @@ final class NotchWindowController: NSObject {
         stopGlobalClickMonitor()
         mouseMovedMonitor?.stop()
         mouseMovedMonitor = nil
+        repositionWorkItem?.cancel()
+        repositionWorkItem = nil
         cancellables.removeAll()
         if let observer = screenObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -183,6 +200,19 @@ final class NotchWindowController: NSObject {
         panel = nil
     }
 
+    /// Re-apply the panel frame after a screen-parameter change. Runs once
+    /// immediately, then again after a short delay: a display reconnect emits
+    /// several notifications and AppKit relocates/resizes windows during the
+    /// transition, so the first pass is often clobbered before the layout
+    /// settles. The delayed pass lands the panel back on the correct frame.
+    private func scheduleReposition() {
+        reposition()
+        repositionWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.reposition() }
+        repositionWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
+    }
+
     private func reposition() {
         let expanded = computeExpandedSize()
         guard let placement = NotchGeometry.placement(expandedSize: expanded) else { return }
@@ -190,7 +220,11 @@ final class NotchWindowController: NSObject {
         expandedPanelFrame = placement.panelFrame
         collapsedPanelFrame = pillFrame(for: placement)
         guard let panel else { return }
-        panel.setFrame(state.isExpanded ? expandedPanelFrame : collapsedPanelFrame, display: true)
+        // The window is always sized to the expanded frame; the collapsed
+        // pill is drawn inside it by SwiftUI and collapsedPanelFrame is only
+        // the hover hot-zone. Setting the window to the collapsed frame here
+        // would leave the expanded content clipped and off-center.
+        panel.setFrame(expandedPanelFrame, display: true)
     }
 
     /// Recompute the expanded panel size from current ambient settings and
