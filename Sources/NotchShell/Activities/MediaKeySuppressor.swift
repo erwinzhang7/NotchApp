@@ -41,6 +41,21 @@ final class MediaKeySuppressor {
     /// (rawValue 14), so we force-unwrap once at type level.
     nonisolated private static let systemDefined = CGEventType(rawValue: 14)!
 
+    /// Brightness keys are only ours to drive when the built-in panel is the
+    /// SOLE display. With any external display attached (e.g. a Studio
+    /// Display) we let the key pass through to macOS so it controls the right
+    /// monitor — and, critically, so we never swallow the key and drive
+    /// brightness on the wrong display. Our brightness ribbon is anchored at
+    /// the physical notch, which only exists on the built-in panel anyway.
+    nonisolated private static func shouldHandleBrightnessKeys() -> Bool {
+        var count: UInt32 = 0
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count == 1 else { return false }
+        var id = CGDirectDisplayID(0)
+        var got: UInt32 = 0
+        guard CGGetOnlineDisplayList(1, &id, &got) == .success, got == 1 else { return false }
+        return CGDisplayIsBuiltin(id) != 0
+    }
+
     /// Singleton-style weak reference so the C tap callback can hop back
     /// to the live instance without retaining it.
     nonisolated(unsafe) private static weak var active: MediaKeySuppressor?
@@ -211,6 +226,15 @@ final class MediaKeySuppressor {
              Self.NX_KEYTYPE_BRIGHTNESS_DOWN:
             break
         default:
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Don't intercept brightness while an external display is attached —
+        // let macOS handle it so the external monitor's brightness keeps
+        // working and we never touch the wrong display.
+        let isBrightness = keyCode == Self.NX_KEYTYPE_BRIGHTNESS_UP
+            || keyCode == Self.NX_KEYTYPE_BRIGHTNESS_DOWN
+        if isBrightness, !Self.shouldHandleBrightnessKeys() {
             return Unmanaged.passUnretained(event)
         }
 

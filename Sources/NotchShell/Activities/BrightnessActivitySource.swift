@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import CoreGraphics
 import Darwin
@@ -39,9 +40,11 @@ final class BrightnessActivitySource: ObservableObject {
     private var frameworkHandle: UnsafeMutableRawPointer?
     private var getBrightness: GetBrightnessFunction?
     private var setBrightness: SetBrightnessFunction?
+    private var register: RegisterFunction?
     private var unregister: UnregisterFunction?
     private var displayID: CGDirectDisplayID?
     private var previousLevel: Int?
+    private var screenObserver: NSObjectProtocol?
 
     /// Wall-clock time of the last user-initiated brightness change
     /// (i.e., MediaKeySuppressor calling `adjust(by:)` from a key press).
@@ -74,6 +77,7 @@ final class BrightnessActivitySource: ObservableObject {
         frameworkHandle = handle
         getBrightness = getter
         setBrightness = setter
+        self.register = register
         self.unregister = unregister
         displayID = builtInDisplayID
         Self.activeSource = self
@@ -82,10 +86,43 @@ final class BrightnessActivitySource: ObservableObject {
             stop()
             return
         }
+        installScreenObserver()
         refresh(emit: false)
     }
 
+    /// Re-point the registered display after a hot-plug. Display IDs are
+    /// reassigned across reconnects, so a cached ID can come to refer to a
+    /// different (e.g. external) display — reads would then report the wrong
+    /// panel and the change callback would stop firing. Re-resolve the
+    /// built-in and move the registration to it (dropping it entirely when
+    /// no built-in is present, e.g. clamshell).
+    private func installScreenObserver() {
+        guard screenObserver == nil else { return }
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reconcileDisplay() }
+        }
+    }
+
+    private func reconcileDisplay() {
+        let current = Self.builtInDisplayID()
+        guard current != displayID else { return }
+        if let old = displayID { _ = unregister?(old, old) }
+        displayID = current
+        previousLevel = nil
+        if let current, let register {
+            _ = register(current, current, Self.brightnessCallback)
+        }
+    }
+
     func stop() {
+        if let screenObserver {
+            NotificationCenter.default.removeObserver(screenObserver)
+            self.screenObserver = nil
+        }
         if let displayID {
             _ = unregister?(displayID, displayID)
         }
@@ -95,6 +132,7 @@ final class BrightnessActivitySource: ObservableObject {
         displayID = nil
         getBrightness = nil
         setBrightness = nil
+        register = nil
         unregister = nil
         previousLevel = nil
         if let frameworkHandle {
@@ -118,7 +156,12 @@ final class BrightnessActivitySource: ObservableObject {
     /// `lastUserAdjustAt` so the callback knows this change is
     /// user-initiated and worth showing.
     func adjust(by delta: Float) {
-        guard let displayID, let getBrightness, let setBrightness else { return }
+        guard let getBrightness, let setBrightness else { return }
+        // Re-resolve the built-in display on every call. Display IDs are
+        // reassigned across hot-plug, and writing to a stale/recycled ID can
+        // land on an external monitor — e.g. driving a Studio Display to
+        // zero. If no built-in is currently present (clamshell), do nothing.
+        guard let displayID = Self.builtInDisplayID() else { return }
         var current: Float = 0
         guard getBrightness(displayID, &current) == 0, current.isFinite else { return }
         let next = min(max(current + delta, 0), 1)
