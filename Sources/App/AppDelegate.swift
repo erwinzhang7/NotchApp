@@ -35,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let bluetoothSource = BluetoothActivitySource()
     private let brightnessSource = BrightnessActivitySource()
     private let volumeSource = VolumeActivitySource()
+    /// Mirrors macAudio's synced master volume into the ribbon. When macAudio
+    /// is running it owns volume control (and the hardware keys, ceded by
+    /// MediaKeySuppressor); this renders its broadcasts. Silent otherwise.
+    private let macAudioVolumeBridge = MacAudioVolumeBridge()
     /// Hardware-key suppressor: intercepts brightness/volume/mute keys
     /// before macOS shows its native HUD so the user only sees the
     /// notch activity. Lazy because it captures the sources above.
@@ -124,6 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bluetoothSource.stop()
         brightnessSource.stop()
         volumeSource.stop()
+        macAudioVolumeBridge.stop()
         mediaKeySuppressor.stop()
         copyBanner.stop()
         nowPlayingBridge.stop()
@@ -282,6 +287,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             .store(in: &cancellables)
         volumeSource.start()
+
+        // macAudio's synced master volume → the same volume ribbon. Shares
+        // VolumeActivity, so it's visually identical to NotchApp-driven
+        // changes; only one path is ever active at a time (keys are ceded to
+        // macAudio while it runs, so volumeSource stays quiet then).
+        macAudioVolumeBridge.events
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] snapshot in
+                self?.idleNotchPill.engine.showTemporary(
+                    VolumeActivity(level: snapshot.level, isMuted: snapshot.isMuted),
+                    duration: Self.temporaryActivityDuration
+                )
+            }
+            .store(in: &cancellables)
+        macAudioVolumeBridge.start()
 
         // Auto-copy-on-selection → notch banner. The selection monitor
         // only fires when the captured text actually entered the store

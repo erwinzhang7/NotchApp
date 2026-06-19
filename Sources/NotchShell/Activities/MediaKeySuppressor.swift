@@ -27,6 +27,7 @@ final class MediaKeySuppressor {
     private var runLoopSource: CFRunLoopSource?
     private var trustPollTimer: Timer?
     private var promptedForAccess = false
+    private var workspaceObservers: [NSObjectProtocol] = []
 
     nonisolated private static let normalStep: Float = 1.0 / 16.0
     nonisolated private static let fineStep: Float = 1.0 / 64.0
@@ -60,6 +61,14 @@ final class MediaKeySuppressor {
     /// to the live instance without retaining it.
     nonisolated(unsafe) private static weak var active: MediaKeySuppressor?
 
+    /// When macAudio is running it owns volume control (it syncs a master
+    /// level across a multi-output set the system can't), so we pass volume
+    /// and mute keys through to it and just render its broadcasts via
+    /// MacAudioVolumeBridge. Read from the tap thread, written on main — a
+    /// plain Bool flag, benign to race.
+    nonisolated private static let macAudioBundleID = "com.erwinzhang.macAudio"
+    nonisolated(unsafe) private static var macAudioRunning = false
+
     init(brightness: BrightnessActivitySource, volume: VolumeActivitySource) {
         self.brightness = brightness
         self.volume = volume
@@ -67,6 +76,7 @@ final class MediaKeySuppressor {
 
     func start() {
         Self.active = self
+        startMacAudioWatch()
         let trusted = AXIsProcessTrusted()
         NSLog("[MediaKeys] start() — AX trusted=%@", trusted ? "Y" : "N")
         if installTap() { return }
@@ -87,7 +97,36 @@ final class MediaKeySuppressor {
         teardownTap()
         trustPollTimer?.invalidate()
         trustPollTimer = nil
+        let nc = NSWorkspace.shared.notificationCenter
+        workspaceObservers.forEach { nc.removeObserver($0) }
+        workspaceObservers.removeAll()
         if Self.active === self { Self.active = nil }
+    }
+
+    // MARK: - macAudio presence
+
+    /// Track whether macAudio is running so the tap can cede volume/mute keys
+    /// to it. Seed from the current running set, then keep it live via launch
+    /// / terminate notifications.
+    private func startMacAudioWatch() {
+        guard workspaceObservers.isEmpty else { return }
+        Self.macAudioRunning = NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier == Self.macAudioBundleID
+        }
+        let nc = NSWorkspace.shared.notificationCenter
+        let update: (Notification, Bool) -> Void = { note, running in
+            guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  app.bundleIdentifier == Self.macAudioBundleID else { return }
+            Self.macAudioRunning = running
+        }
+        workspaceObservers = [
+            nc.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) {
+                update($0, true)
+            },
+            nc.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) {
+                update($0, false)
+            },
+        ]
     }
 
     // MARK: - Tap lifecycle
@@ -235,6 +274,16 @@ final class MediaKeySuppressor {
         let isBrightness = keyCode == Self.NX_KEYTYPE_BRIGHTNESS_UP
             || keyCode == Self.NX_KEYTYPE_BRIGHTNESS_DOWN
         if isBrightness, !Self.shouldHandleBrightnessKeys() {
+            return Unmanaged.passUnretained(event)
+        }
+
+        // Cede volume/mute keys to macAudio while it's running — it controls
+        // volume (syncing a multi-output set) and broadcasts the result back
+        // to our ribbon. We must not also drive or swallow the key.
+        let isVolumeOrMute = keyCode == Self.NX_KEYTYPE_SOUND_UP
+            || keyCode == Self.NX_KEYTYPE_SOUND_DOWN
+            || keyCode == Self.NX_KEYTYPE_MUTE
+        if isVolumeOrMute, Self.macAudioRunning {
             return Unmanaged.passUnretained(event)
         }
 
