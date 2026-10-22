@@ -24,7 +24,7 @@ brew install erwinzhang7/notchapp/notchapp
 
 ## Features
 
-**Clipboard Manager** — Tracks your last N clipboard entries (text, images, files) across the session. History is held entirely in RAM and discarded on quit — never written to disk, no database, no file. Password-manager entries (`org.nspasteboard.ConcealedType`) and transient items are silently skipped at capture time.
+**Clipboard Manager** — Tracks your last 200 clipboard entries (text, images, files) across the session, capped at 64 MB; the oldest entries drop off first. History is held entirely in RAM and discarded on quit — never written to disk, no database, no file. Password-manager entries (`org.nspasteboard.ConcealedType`) and transient items are silently skipped at capture time.
 
 **File Shelf** — A temporary staging area for files you're working with. Drag files onto the notch panel to park them; drag them back out to use. File references are stored as security-scoped bookmarks, not byte copies — the app remembers where files are without duplicating content.
 

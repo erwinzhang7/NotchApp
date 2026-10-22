@@ -138,7 +138,7 @@ final class ClipboardMonitor {
         guard let image = NSImage(data: data) else { return nil }
 
         let thumb = Self.thumbnail(of: image, maxSide: Self.thumbnailMaxSide)
-        return ImagePayload(image: image, thumbnail: thumb, dataHash: data.hashValue)
+        return ImagePayload(image: image, thumbnail: thumb, dataHash: data.hashValue, byteCount: data.count)
     }
 
     private static func thumbnail(of image: NSImage, maxSide: CGFloat) -> NSImage {

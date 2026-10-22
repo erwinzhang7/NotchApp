@@ -10,6 +10,12 @@ struct ClaudeUsageReader {
         // (as before) undercounted output by ~12%. Match ccusage: keep the
         // last entry for each hash by overwriting in place.
         var indexByHash: [String: Int] = [:]
+        // Session ids and model names repeat on every line of a file. Share
+        // one copy of each instead of a fresh heap string per event.
+        var interned = Set<String>()
+        func intern(_ string: String) -> String {
+            interned.insert(string).memberAfterInsert
+        }
         let roots = claudeRoots()
 
         if roots.isEmpty {
@@ -19,11 +25,12 @@ struct ClaudeUsageReader {
 
         for root in roots {
             for file in TokenUsageJSONL.jsonlFiles(in: root) {
+                if Task.isCancelled { return result }
                 result.filesScanned += 1
                 let project = projectName(for: file, root: root)
 
                 TokenUsageJSONL.lines(in: file) { line in
-                    guard line.contains("\"usage\""),
+                    guard TokenUsageJSONL.contains("\"usage\"", in: line),
                           let object = TokenUsageJSONL.parseJSONObject(line),
                           let timestamp = TokenUsageJSONL.parseDate(object["timestamp"]),
                           let message = TokenUsageJSONL.dictionary(object["message"]),
@@ -53,9 +60,9 @@ struct ClaudeUsageReader {
                     let event = TokenUsageEvent(
                         source: .claude,
                         timestamp: timestamp,
-                        sessionID: TokenUsageJSONL.stringValue(object["sessionId"]) ?? file.deletingPathExtension().lastPathComponent,
+                        sessionID: intern(TokenUsageJSONL.stringValue(object["sessionId"]) ?? file.deletingPathExtension().lastPathComponent),
                         project: project,
-                        model: displayModel,
+                        model: intern(displayModel),
                         speed: speed,
                         inputTokens: input,
                         outputTokens: output,

@@ -6,6 +6,13 @@ import Foundation
 /// nothing here is ever persisted. No files, no SQLite, no UserDefaults — items live in RAM
 /// and die when the process exits. That's the app's headline privacy guarantee.
 final class ClipboardStore: ObservableObject {
+    /// History bounds. RAM-only storage means every entry costs memory for
+    /// as long as the app runs, and the default auto-clear is "Never", so
+    /// without a cap a day of screenshots and large copies only ever grows.
+    /// The oldest entries go first; the newest one is always kept.
+    static let maxItems = 200
+    static let maxTotalBytes = 64 * 1024 * 1024
+
     @Published private(set) var items: [ClipboardItem] = []
     @Published var searchQuery: String = ""
 
@@ -65,11 +72,28 @@ final class ClipboardStore: ObservableObject {
         // Dedup consecutive identical captures only (per spec).
         if let head = items.first, head.fingerprint == item.fingerprint { return false }
         items.insert(item, at: 0)
+        trimToBudget()
         if case .text(let s) = item.kind {
             let lines = s.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).count
             textCopied.send(TextCopy(characterCount: s.count, lineCount: max(1, lines)))
         }
         return true
+    }
+
+    /// Drops the oldest entries until the history fits `maxItems` and
+    /// `maxTotalBytes`.
+    private func trimToBudget() {
+        var keep = 0
+        var bytes = 0
+        for item in items {
+            let cost = item.byteCost
+            if keep > 0 && (keep >= Self.maxItems || bytes + cost > Self.maxTotalBytes) { break }
+            keep += 1
+            bytes += cost
+        }
+        if keep < items.count {
+            items.removeSubrange(keep...)
+        }
     }
 
     func remove(_ item: ClipboardItem) {

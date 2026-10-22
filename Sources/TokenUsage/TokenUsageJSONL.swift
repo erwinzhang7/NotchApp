@@ -60,37 +60,73 @@ enum TokenUsageJSONL {
         return files.sorted { $0.path < $1.path }
     }
 
-    static func lines(in file: URL, handle: (String) -> Void) {
+    /// Calls `handle` with each non-empty line of `file` as raw bytes. Lines
+    /// stay as `Data` so callers can reject them with `contains(_:in:)`
+    /// before paying for a String or a JSON parse; most bytes in these logs
+    /// are tool output that never carries usage.
+    ///
+    /// Each line is handled inside its own autorelease pool. The readers run
+    /// as one long job off the main thread, and JSONSerialization returns
+    /// autoreleased Foundation objects: without the pool every dictionary
+    /// from every line of every file stays alive until the whole scan ends,
+    /// which over a few GB of logs is gigabytes of footprint.
+    static func lines(in file: URL, handle: (Data) -> Void) {
         guard let stream = InputStream(url: file) else { return }
         stream.open()
         defer { stream.close() }
 
-        let bufferSize = 64 * 1024
+        let bufferSize = 256 * 1024
         var buffer = [UInt8](repeating: 0, count: bufferSize)
         var pending = Data()
 
         while stream.hasBytesAvailable {
             let count = stream.read(&buffer, maxLength: bufferSize)
             if count <= 0 { break }
+            // Only scan the new bytes for newlines; the old tail has none.
+            var searchFrom = pending.count
             pending.append(buffer, count: count)
 
-            while let newline = pending.firstIndex(of: 0x0A) {
-                let lineData = pending[..<newline]
-                pending.removeSubrange(...newline)
-                if let line = String(data: lineData, encoding: .utf8), !line.isEmpty {
-                    handle(line)
+            var lineStart = 0
+            while let newline = firstNewline(in: pending, from: searchFrom) {
+                if newline > lineStart {
+                    autoreleasepool { handle(pending[lineStart..<newline]) }
                 }
+                lineStart = newline + 1
+                searchFrom = lineStart
+            }
+            // Drop consumed lines once per chunk, not once per line.
+            if lineStart > 0 {
+                pending.removeSubrange(0..<lineStart)
             }
         }
 
-        if !pending.isEmpty, let line = String(data: pending, encoding: .utf8), !line.isEmpty {
-            handle(line)
+        if !pending.isEmpty {
+            autoreleasepool { handle(pending) }
         }
     }
 
-    static func parseJSONObject(_ line: String) -> [String: Any]? {
-        guard let data = line.data(using: .utf8) else { return nil }
-        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    private static func firstNewline(in data: Data, from offset: Int) -> Int? {
+        guard offset < data.count else { return nil }
+        return data.withUnsafeBytes { raw -> Int? in
+            guard let base = raw.baseAddress else { return nil }
+            guard let hit = memchr(base + offset, 0x0A, raw.count - offset) else { return nil }
+            return base.distance(to: UnsafeRawPointer(hit))
+        }
+    }
+
+    /// Byte-level substring test for a line from `lines(in:handle:)`.
+    static func contains(_ needle: String, in line: Data) -> Bool {
+        var needle = needle
+        return needle.withUTF8 { pattern in
+            line.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress, let pat = pattern.baseAddress else { return false }
+                return memmem(base, raw.count, pat, pattern.count) != nil
+            }
+        }
+    }
+
+    static func parseJSONObject(_ line: Data) -> [String: Any]? {
+        (try? JSONSerialization.jsonObject(with: line)) as? [String: Any]
     }
 
     static func parseDate(_ value: Any?) -> Date? {

@@ -21,6 +21,7 @@ struct CodexUsageReader {
         var fallbackFileCount = 0
         for root in roots {
             for file in TokenUsageJSONL.jsonlFiles(in: root) {
+                if Task.isCancelled { return result }
                 result.filesScanned += 1
                 let relative = file.path.replacingOccurrences(of: root.path + "/", with: "")
                 let sessionID = relative.replacingOccurrences(of: ".jsonl", with: "")
@@ -30,7 +31,7 @@ struct CodexUsageReader {
                 var usedFallbackInFile = false
 
                 TokenUsageJSONL.lines(in: file) { line in
-                    guard line.contains("turn_context") || line.contains("token_count"),
+                    guard TokenUsageJSONL.contains("turn_context", in: line) || TokenUsageJSONL.contains("token_count", in: line),
                           let object = TokenUsageJSONL.parseJSONObject(line),
                           let entryType = TokenUsageJSONL.stringValue(object["type"])
                     else {

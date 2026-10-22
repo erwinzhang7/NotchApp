@@ -50,24 +50,34 @@ final class TokenUsageStore: ObservableObject {
         refreshTask?.cancel()
         let pricingCache = self.pricingCache
         refreshTask = Task {
-            let rawResult = await Task.detached(priority: .utility) { [claudeReader, codexReader] in
+            // The scan runs detached, so cancelling `refreshTask` alone would
+            // not stop it: forward the cancel so a superseded scan bails at
+            // the next file instead of running to completion alongside the
+            // new one (launch fires two refreshes back to back).
+            let scan = Task.detached(priority: .utility) { [claudeReader, codexReader] in
                 var claude = claudeReader.loadEvents()
                 let codex = codexReader.loadEvents()
                 claude.events.append(contentsOf: codex.events)
                 claude.filesScanned += codex.filesScanned
                 claude.warnings.append(contentsOf: codex.warnings)
                 return claude
-            }.value
+            }
+            var rawResult = await withTaskCancellationHandler {
+                await scan.value
+            } onCancel: {
+                scan.cancel()
+            }
+            guard !Task.isCancelled else { return }
 
-            var events: [TokenUsageEvent] = []
-            events.reserveCapacity(rawResult.events.count)
-            for var event in rawResult.events.sorted(by: { $0.timestamp < $1.timestamp }) {
-                event.estimatedCostUSD = await pricingCache.estimatedCost(for: event)
-                events.append(event)
+            // Sort and price in place: the event list is the scan's largest
+            // allocation, and copying it twice doubled the peak.
+            rawResult.events.sort { $0.timestamp < $1.timestamp }
+            for index in rawResult.events.indices {
+                rawResult.events[index].estimatedCostUSD = await pricingCache.estimatedCost(for: rawResult.events[index])
             }
 
             guard !Task.isCancelled else { return }
-            snapshot = makeSnapshot(from: events, filesScanned: rawResult.filesScanned, warnings: rawResult.warnings)
+            snapshot = makeSnapshot(from: rawResult.events, filesScanned: rawResult.filesScanned, warnings: rawResult.warnings)
             NSLog("[TokenUsage] Loaded \(snapshot.eventsLoaded) event(s) from \(snapshot.filesScanned) file(s); estimated cost $\(String(format: "%.2f", snapshot.totals.estimatedCostUSD))")
         }
     }
@@ -110,6 +120,15 @@ final class TokenUsageStore: ObservableObject {
         snapshot.eventsLoaded = events.count
         snapshot.warnings = warnings
 
+        // Resolve the period windows once. Asking Calendar per event goes
+        // through ICU every time, and this loop runs on the main actor over
+        // every event in the user's history.
+        let calendar = Calendar.current
+        let now = Date()
+        let today = calendar.dateInterval(of: .day, for: now)
+        let thisWeek = calendar.dateInterval(of: .weekOfYear, for: now)
+        let thisMonth = calendar.dateInterval(of: .month, for: now)
+
         for event in events {
             snapshot.totals.add(event)
 
@@ -128,14 +147,13 @@ final class TokenUsageStore: ObservableObject {
             snapshot.byModel[modelKey] = modelTotals
 
             var periodTotals = snapshot.periodTotals[event.source] ?? TokenUsagePeriodTotals()
-            let now = Date()
-            if Calendar.current.isDateInToday(event.timestamp) {
+            if today?.contains(event.timestamp) == true {
                 periodTotals.daily.add(event)
             }
-            if Calendar.current.isDate(event.timestamp, equalTo: now, toGranularity: .weekOfYear) {
+            if thisWeek?.contains(event.timestamp) == true {
                 periodTotals.weekly.add(event)
             }
-            if Calendar.current.isDate(event.timestamp, equalTo: now, toGranularity: .month) {
+            if thisMonth?.contains(event.timestamp) == true {
                 periodTotals.monthly.add(event)
             }
             snapshot.periodTotals[event.source] = periodTotals
